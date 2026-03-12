@@ -20,8 +20,8 @@ from ._http import HttpClient
 from .clients import ClientsModule
 from .onboarding import OnboardingModule
 
-PRODUCTION_URL = 'https://api.atendeaqui.com.br/api'
-SANDBOX_URL = 'https://sandbox.atendeaqui.com.br/api'
+PRODUCTION_URL = 'https://api.atendeaqui.com.br/v1'
+SANDBOX_URL = 'https://api.homolog.atendeaqui.com.br/v1'
 
 
 class AtendeAquiClient:
@@ -40,7 +40,7 @@ class AtendeAquiClient:
                   Se fornecido, será usado como default nos métodos
                   de onboarding (pode ser sobrescrito por chamada).
         sandbox: Se True, usa o ambiente de homologação
-                 (sandbox.atendeaqui.com.br). Padrão: False (produção).
+                 (api.homolog.atendeaqui.com.br/v1). Padrão: False (produção).
         timeout: Timeout em segundos para requisições HTTP. Padrão: 30.
 
     Pelo menos um de ``api_token`` ou ``flow_key`` deve ser fornecido.
