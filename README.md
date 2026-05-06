@@ -139,6 +139,14 @@ progress = client.onboarding.start_flow(
     metadata={"company": "Acme", "preferred_language": "pt-BR"},
 )
 
+# Registrar início de um step (rastreamento, sem marcar como completo)
+progress = client.onboarding.start_step(
+    user_id="user-123",
+    flow_key=FLOW,
+    step_key="welcome",
+    metadata={"source": "sidebar", "device": "desktop"},  # opcional
+)
+
 # Completar steps
 progress = client.onboarding.complete_step(
     user_id="user-123",
