@@ -379,6 +379,74 @@ class TestOnboardingCompleteStep:
             client.onboarding.complete_step(user_id='user-123', step_key='invalid')
 
 
+class TestOnboardingStartStep:
+    @responses.activate
+    def test_start_step(self, client):
+        responses.add(
+            responses.POST,
+            f'{BASE_URL}/api/onboarding/{FLOW_KEY}/progress/user-123/start-step/',
+            json=PROGRESS_DATA,
+            status=200,
+        )
+
+        progress = client.onboarding.start_step(
+            user_id='user-123',
+            step_key='welcome',
+        )
+
+        assert isinstance(progress, UserProgress)
+        body = json.loads(responses.calls[0].request.body)
+        assert body['step_key'] == 'welcome'
+        assert 'metadata' not in body
+
+    @responses.activate
+    def test_start_step_with_metadata(self, client):
+        responses.add(
+            responses.POST,
+            f'{BASE_URL}/api/onboarding/{FLOW_KEY}/progress/user-123/start-step/',
+            json=PROGRESS_DATA,
+            status=200,
+        )
+
+        client.onboarding.start_step(
+            user_id='user-123',
+            step_key='configure-api',
+            metadata={'source': 'sidebar', 'device': 'desktop'},
+        )
+
+        body = json.loads(responses.calls[0].request.body)
+        assert body['metadata'] == {'source': 'sidebar', 'device': 'desktop'}
+
+    @responses.activate
+    def test_start_step_sends_flow_key_header(self, client):
+        responses.add(
+            responses.POST,
+            f'{BASE_URL}/api/onboarding/{FLOW_KEY}/progress/user-123/start-step/',
+            json=PROGRESS_DATA,
+            status=200,
+        )
+
+        client.onboarding.start_step(user_id='user-123', step_key='welcome')
+
+        assert responses.calls[0].request.headers['X-Onboarding-Key'] == FLOW_KEY
+
+    @responses.activate
+    def test_start_step_not_found(self, client):
+        responses.add(
+            responses.POST,
+            f'{BASE_URL}/api/onboarding/{FLOW_KEY}/progress/user-123/start-step/',
+            json={'error': {'code': 'STEP_NOT_FOUND', 'message': 'Step não existe'}},
+            status=400,
+        )
+
+        with pytest.raises(StepNotFoundError):
+            client.onboarding.start_step(user_id='user-123', step_key='invalid')
+
+    def test_start_step_without_flow_key(self, admin_only_client):
+        with pytest.raises(ValueError, match='flow_key'):
+            admin_only_client.onboarding.start_step(user_id='user-123', step_key='welcome')
+
+
 class TestOnboardingBatchComplete:
     @responses.activate
     def test_complete_steps_batch(self, client):

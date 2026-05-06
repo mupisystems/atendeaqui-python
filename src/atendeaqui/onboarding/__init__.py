@@ -167,6 +167,40 @@ class OnboardingModule:
         )
         return UserProgress.from_dict(data)
 
+    def start_step(
+        self,
+        user_id: str,
+        step_key: str,
+        flow_key: str | None = None,
+        metadata: dict | None = None,
+    ) -> UserProgress:
+        """
+        Registra que o usuário iniciou um step (sem marcá-lo como completo).
+
+        Útil para rastrear tempo de permanência em cada step e detectar
+        abandono antes da conclusão.
+
+        Args:
+            user_id: Identificador único do usuário no sistema externo.
+            step_key: Chave do step que o usuário iniciou.
+            flow_key: UUID público do flow. Usa o default do client se omitido.
+            metadata: Dados contextuais opcionais (ex: source, device).
+
+        Raises:
+            StepNotFoundError: Se o step_key não existe no flow.
+        """
+        fk = self._resolve_flow_key(flow_key)
+        body: dict = {'step_key': step_key}
+        if metadata:
+            body['metadata'] = metadata
+
+        data = self._http.post(
+            f'onboarding/{fk}/progress/{user_id}/start-step/',
+            json=body,
+            headers=self._flow_headers(fk),
+        )
+        return UserProgress.from_dict(data)
+
     def complete_steps(
         self,
         user_id: str,
