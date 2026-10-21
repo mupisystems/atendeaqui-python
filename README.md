@@ -122,6 +122,72 @@ admin.clients.update_team_member(novo.client_id, member.id, can_edit_client=True
 admin.clients.remove_team_member(novo.client_id, member.id)
 ```
 
+### CRM (requer api_token)
+
+Empresas do CRM, identificadas pelo `platform_id` (o id da empresa no seu sistema).
+A plataforma é a fonte da verdade: os campos enviados sobrescrevem os do CRM, os omitidos não mudam.
+
+```python
+admin = AtendeAquiClient(api_token="seu-bearer-token")
+
+# Cria ou atualiza pelo platform_id (chamar de novo não duplica)
+empresa = admin.crm.upsert_company(
+    platform_id="1842",
+    name="Construtora Alfa",   # único por organização: nome em uso por outra empresa → ValidationError (409)
+    status="cliente",          # prospect, trial, cliente ou churned
+    mrr="349.90",
+)
+
+# Só o nome: status e MRR não mudam
+admin.crm.upsert_company(platform_id="1842", name="Construtora Alfa Ltda")
+
+# mrr=None limpa o MRR (diferente de omitir)
+admin.crm.upsert_company(platform_id="1842", name="Construtora Alfa", status="churned", mrr=None)
+```
+
+### Engajamento de uso (requer api_token)
+
+Eventos de `login` e `page_view` por empresa e usuário. Sessões, tempo por tela e frequência
+são calculados no AtendeAqui. A empresa precisa existir no CRM antes dos eventos dela.
+
+```python
+import uuid
+from datetime import datetime, timezone
+
+# Um evento (event_id e occurred_at são gerados se omitidos)
+admin.engagement.track(type="login", company_platform_id="1842", user_id="77")
+
+# Lote de 1 a 500 eventos
+result = admin.engagement.track_batch([
+    {
+        "type": "page_view",
+        "company_platform_id": "1842",
+        "user_id": "77",
+        "feature": "employers:job_list",          # chave estável da tela (^[a-z0-9_.:-]+$)
+        "feature_name": "Processos seletivos",    # nome exibido; pode mudar
+        # Numa fila, gere estes dois ao enfileirar e reenvie sempre os mesmos:
+        "event_id": str(uuid.uuid4()),
+        "occurred_at": datetime.now(timezone.utc),
+    },
+])
+
+result.accepted     # novos gravados
+result.duplicates   # event_id já recebido (reenvio): não é erro
+for error in result.errors:
+    if error.is_company_not_found:
+        ...  # admin.crm.upsert_company(...) e reenvie com o MESMO event_id
+    else:
+        ...  # não se resolve sozinho: registre e descarte
+```
+
+| Resultado | O que fazer |
+|---|---|
+| `accepted` / `duplicates` | Remova o evento da fila |
+| `error.is_company_not_found` | Cadastre a empresa e reenvie com o mesmo `event_id` |
+| Outros `errors` | Registre e descarte |
+| `ServerError`, `RateLimitError`, timeout | Reenvie o lote inteiro, com os mesmos `event_id` |
+| `AuthenticationError` | Token inválido: pare e alerte |
+
 ### Onboarding
 
 ```python
@@ -512,6 +578,12 @@ atendeaqui/
 ├── clients/             # Módulo de Clientes
 │   ├── __init__.py      # ClientsModule
 │   └── models.py        # Client, TeamMember
+├── crm/                 # Módulo de CRM
+│   ├── __init__.py      # CrmModule
+│   └── models.py        # Company
+├── engagement/          # Módulo de Engajamento de Uso
+│   ├── __init__.py      # EngagementModule
+│   └── models.py        # UsageResult, UsageError
 └── onboarding/          # Módulo de Onboarding
     ├── __init__.py      # OnboardingModule
     └── models.py        # FlowStructure, UserProgress, etc.

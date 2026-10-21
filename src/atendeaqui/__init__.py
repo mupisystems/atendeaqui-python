@@ -25,6 +25,8 @@ from .exceptions import (
     ServerError,
 )
 from .clients.models import Client, TeamMember
+from .crm.models import Company
+from .engagement.models import UsageError, UsageResult
 from .onboarding.models import (
     FlowStructure,
     FlowStep,
@@ -49,6 +51,11 @@ __all__ = [
     # Models - Clients
     'Client',
     'TeamMember',
+    # Models - CRM
+    'Company',
+    # Models - Engagement
+    'UsageError',
+    'UsageResult',
     # Models - Onboarding
     'FlowStructure',
     'FlowStep',

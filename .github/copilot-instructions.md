@@ -26,6 +26,8 @@ The SDK is a thin HTTP wrapper around the AtendeAqui REST API.
 AtendeAquiClient (src/atendeaqui/client.py)
 ├── HttpClient (_http.py)          — shared requests.Session, error handling
 ├── ClientsModule (clients/)       — client.clients.*
+├── CrmModule (crm/)               — client.crm.*
+├── EngagementModule (engagement/) — client.engagement.*
 └── OnboardingModule (onboarding/) — client.onboarding.*
 ```
 
