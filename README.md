@@ -223,8 +223,8 @@ progress_list = client.onboarding.list_progress(slug="meu-flow")
 client.onboarding.update_flow(
     "meu-flow",
     step_stalled_after_hours=48,   # step iniciado e não concluído em 48 h = travado
-    email_deadline_days=30,        # prazo desde o início
-    auto_abandon_on_deadline=True, # marca ABANDONED quando o prazo vence
+    email_deadline_days=30,          # sem e-mails depois de 30 dias do início
+    abandon_after_inactive_days=30,  # marca ABANDONED após 30 dias sem atividade; atividade nova reativa
 )
 
 # Admin: e-mails automáticos de onboarding (requer api_token)

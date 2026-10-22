@@ -426,8 +426,8 @@ class OnboardingModule:
             client.onboarding.update_flow(
                 'meu-flow',
                 step_stalled_after_hours=48,   # step iniciado e não concluído = travado
-                email_deadline_days=30,        # prazo desde o início (None = sem prazo)
-                auto_abandon_on_deadline=True, # abandona o progresso ao vencer o prazo
+                email_deadline_days=30,          # sem e-mails depois de 30 dias do início (None = sem prazo)
+                abandon_after_inactive_days=30,  # abandona quem fica 30 dias sem atividade (None = nunca)
             )
 
         E-mails do flow: email_provider_config (id do provedor, ex.: Postmark do
