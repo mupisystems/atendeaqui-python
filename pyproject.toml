@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "atendeaqui"
-version = "1.1.0"
+dynamic = ["version"]
 description = "SDK Python para a plataforma AtendeAqui"
 readme = "README.md"
 license = "MIT"
@@ -30,6 +30,9 @@ dev = [
     "pytest>=7.0",
     "responses>=0.23",
 ]
+
+[tool.hatch.version]
+path = "src/atendeaqui/_version.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/atendeaqui"]
