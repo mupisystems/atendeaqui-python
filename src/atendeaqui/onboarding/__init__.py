@@ -10,12 +10,38 @@ Acessado via client.onboarding:
 """
 from __future__ import annotations
 
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 from .models import FlowStructure, UserProgress, WidgetToken, FlowAnalytics
 
 if TYPE_CHECKING:
     from .._http import HttpClient
+
+
+def _format_occurred_at(occurred_at: datetime | str | None) -> str | None:
+    """
+    ``occurred_at`` como ISO 8601 para a API.
+
+    datetime sem fuso é recusado: a API o leria no fuso do servidor, e o
+    evento ficaria registrado horas antes ou depois do que aconteceu.
+    """
+    if occurred_at is None or isinstance(occurred_at, str):
+        return occurred_at
+    if occurred_at.tzinfo is None or occurred_at.utcoffset() is None:
+        raise ValueError(
+            'occurred_at precisa ter fuso horário (ex.: datetime.now(timezone.utc) '
+            'ou django.utils.timezone.now()).'
+        )
+    return occurred_at.isoformat()
+
+
+def _with_occurred_at(body: dict, occurred_at: datetime | str | None) -> dict:
+    """Inclui occurred_at no corpo quando informado."""
+    formatted = _format_occurred_at(occurred_at)
+    if formatted:
+        body['occurred_at'] = formatted
+    return body
 
 
 class OnboardingModule:
@@ -83,6 +109,7 @@ class OnboardingModule:
         email: str | None = None,
         metadata: dict | None = None,
         client_id: str | None = None,
+        occurred_at: datetime | str | None = None,
     ) -> UserProgress:
         """
         Inicia o flow de onboarding para um usuário externo.
@@ -96,6 +123,9 @@ class OnboardingModule:
             email: Email do usuário (opcional, mas recomendado para e-mails automáticos).
             metadata: Dados adicionais (ex: empresa, setor, preferred_language).
             client_id: UUID do cliente na organização (opcional, vincula onboarding ao cliente).
+            occurred_at: Quando aconteceu na sua aplicação (datetime com fuso ou
+                ISO 8601). Use ao enviar depois do fato (fila, reprocessamento,
+                carga retroativa). Padrão: horário do servidor.
         """
         fk = self._resolve_flow_key(flow_key)
         body: dict = {'external_user_id': user_id}
@@ -107,6 +137,7 @@ class OnboardingModule:
             body['metadata'] = metadata
         if client_id:
             body['client_id'] = client_id
+        _with_occurred_at(body, occurred_at)
 
         data = self._http.post(
             f'onboarding/{fk}/start/',
@@ -139,6 +170,7 @@ class OnboardingModule:
         step_key: str,
         flow_key: str | None = None,
         step_data: dict | None = None,
+        occurred_at: datetime | str | None = None,
     ) -> UserProgress:
         """
         Marca um step como completo e avança no flow.
@@ -151,6 +183,9 @@ class OnboardingModule:
             step_key: Chave do step a completar.
             flow_key: UUID público do flow. Usa o default do client se omitido.
             step_data: Dados do step (JSON livre).
+            occurred_at: Quando aconteceu na sua aplicação (datetime com fuso ou
+                ISO 8601). Use ao enviar depois do fato (fila, reprocessamento,
+                carga retroativa). Padrão: horário do servidor.
 
         Raises:
             StepNotFoundError: Se o step_key não existe no flow.
@@ -159,6 +194,7 @@ class OnboardingModule:
         body: dict = {'step_key': step_key}
         if step_data:
             body['step_data'] = step_data
+        _with_occurred_at(body, occurred_at)
 
         data = self._http.post(
             f'onboarding/{fk}/progress/{user_id}/complete-step/',
@@ -173,6 +209,7 @@ class OnboardingModule:
         step_key: str,
         flow_key: str | None = None,
         metadata: dict | None = None,
+        occurred_at: datetime | str | None = None,
     ) -> UserProgress:
         """
         Registra que o usuário iniciou um step (sem marcá-lo como completo).
@@ -185,6 +222,9 @@ class OnboardingModule:
             step_key: Chave do step que o usuário iniciou.
             flow_key: UUID público do flow. Usa o default do client se omitido.
             metadata: Dados contextuais opcionais (ex: source, device).
+            occurred_at: Quando aconteceu na sua aplicação (datetime com fuso ou
+                ISO 8601). Use ao enviar depois do fato (fila, reprocessamento,
+                carga retroativa). Padrão: horário do servidor.
 
         Raises:
             StepNotFoundError: Se o step_key não existe no flow.
@@ -193,6 +233,7 @@ class OnboardingModule:
         body: dict = {'step_key': step_key}
         if metadata:
             body['metadata'] = metadata
+        _with_occurred_at(body, occurred_at)
 
         data = self._http.post(
             f'onboarding/{fk}/progress/{user_id}/start-step/',
@@ -212,7 +253,8 @@ class OnboardingModule:
 
         Args:
             user_id: Identificador único do usuário no sistema externo.
-            steps: Lista de dicts com step_key e step_data opcional.
+            steps: Lista de dicts com step_key e, opcionais, step_data e occurred_at
+                (datetime com fuso ou ISO 8601: quando cada step foi concluído).
                 Ex: [{"step_key": "welcome"}, {"step_key": "config", "step_data": {...}}]
             flow_key: UUID público do flow. Usa o default do client se omitido.
 
@@ -220,9 +262,13 @@ class OnboardingModule:
             ValidationError: Se algum step_key não existe.
         """
         fk = self._resolve_flow_key(flow_key)
+        items = []
+        for step in steps:
+            item = {key: value for key, value in step.items() if key != 'occurred_at'}
+            items.append(_with_occurred_at(item, step.get('occurred_at')))
         data = self._http.post(
             f'onboarding/{fk}/progress/{user_id}/complete-steps/',
-            json={'steps': steps},
+            json={'steps': items},
             headers=self._flow_headers(fk),
         )
         return UserProgress.from_dict(data)
@@ -232,6 +278,7 @@ class OnboardingModule:
         user_id: str,
         step_key: str,
         flow_key: str | None = None,
+        occurred_at: datetime | str | None = None,
     ) -> UserProgress:
         """
         Pula um step opcional.
@@ -240,6 +287,9 @@ class OnboardingModule:
             user_id: Identificador único do usuário no sistema externo.
             step_key: Chave do step a pular.
             flow_key: UUID público do flow. Usa o default do client se omitido.
+            occurred_at: Quando aconteceu na sua aplicação (datetime com fuso ou
+                ISO 8601). Use ao enviar depois do fato (fila, reprocessamento,
+                carga retroativa). Padrão: horário do servidor.
 
         Raises:
             StepNotSkippableError: Se o step é obrigatório.
@@ -247,34 +297,52 @@ class OnboardingModule:
         fk = self._resolve_flow_key(flow_key)
         data = self._http.post(
             f'onboarding/{fk}/progress/{user_id}/skip-step/',
-            json={'step_key': step_key},
+            json=_with_occurred_at({'step_key': step_key}, occurred_at),
             headers=self._flow_headers(fk),
         )
         return UserProgress.from_dict(data)
 
-    def complete_flow(self, user_id: str, flow_key: str | None = None) -> UserProgress:
-        """Marca o flow como completo manualmente."""
+    def complete_flow(
+        self,
+        user_id: str,
+        flow_key: str | None = None,
+        occurred_at: datetime | str | None = None,
+    ) -> UserProgress:
+        """Marca o flow como completo manualmente. ``occurred_at``: quando aconteceu (padrão: agora)."""
         fk = self._resolve_flow_key(flow_key)
         data = self._http.post(
             f'onboarding/{fk}/progress/{user_id}/complete/',
+            json=_with_occurred_at({}, occurred_at),
             headers=self._flow_headers(fk),
         )
         return UserProgress.from_dict(data)
 
-    def restart_flow(self, user_id: str, flow_key: str | None = None) -> UserProgress:
-        """Reinicia o progresso do usuário do zero."""
+    def restart_flow(
+        self,
+        user_id: str,
+        flow_key: str | None = None,
+        occurred_at: datetime | str | None = None,
+    ) -> UserProgress:
+        """Reinicia o progresso do usuário do zero. ``occurred_at``: quando aconteceu (padrão: agora)."""
         fk = self._resolve_flow_key(flow_key)
         data = self._http.post(
             f'onboarding/{fk}/progress/{user_id}/restart/',
+            json=_with_occurred_at({}, occurred_at),
             headers=self._flow_headers(fk),
         )
         return UserProgress.from_dict(data)
 
-    def abandon_flow(self, user_id: str, flow_key: str | None = None) -> UserProgress:
-        """Marca o flow como abandonado."""
+    def abandon_flow(
+        self,
+        user_id: str,
+        flow_key: str | None = None,
+        occurred_at: datetime | str | None = None,
+    ) -> UserProgress:
+        """Marca o flow como abandonado. ``occurred_at``: quando aconteceu (padrão: agora)."""
         fk = self._resolve_flow_key(flow_key)
         data = self._http.post(
             f'onboarding/{fk}/progress/{user_id}/abandon/',
+            json=_with_occurred_at({}, occurred_at),
             headers=self._flow_headers(fk),
         )
         return UserProgress.from_dict(data)
@@ -284,6 +352,7 @@ class OnboardingModule:
         user_id: str,
         metadata: dict,
         flow_key: str | None = None,
+        occurred_at: datetime | str | None = None,
     ) -> UserProgress:
         """
         Atualiza os metadados do usuário (merge com dados existentes).
@@ -292,11 +361,14 @@ class OnboardingModule:
             user_id: Identificador único do usuário no sistema externo.
             metadata: Dicionário com dados a adicionar/atualizar.
             flow_key: UUID público do flow. Usa o default do client se omitido.
+            occurred_at: Quando aconteceu na sua aplicação (datetime com fuso ou
+                ISO 8601). Use ao enviar depois do fato (fila, reprocessamento,
+                carga retroativa). Padrão: horário do servidor.
         """
         fk = self._resolve_flow_key(flow_key)
         data = self._http.patch(
             f'onboarding/{fk}/progress/{user_id}/metadata/',
-            json={'metadata': metadata},
+            json=_with_occurred_at({'metadata': metadata}, occurred_at),
             headers=self._flow_headers(fk),
         )
         return UserProgress.from_dict(data)
@@ -345,6 +417,26 @@ class OnboardingModule:
         """Retorna detalhes completos de um flow (requer api_token)."""
         return self._http.get(f'onboarding/flows/{slug}/')
 
+    def update_flow(self, slug: str, **fields) -> dict:
+        """
+        Atualiza campos de um flow (PATCH; requer api_token com escrita).
+
+        Exemplo, automação de acompanhamento::
+
+            client.onboarding.update_flow(
+                'meu-flow',
+                step_stalled_after_hours=48,   # step iniciado e não concluído = travado
+                email_deadline_days=30,        # prazo desde o início (None = sem prazo)
+                auto_abandon_on_deadline=True, # abandona o progresso ao vencer o prazo
+            )
+
+        Também aceita os demais campos editáveis do flow (name, description,
+        is_active, flow_config...).
+        """
+        if not fields:
+            raise ValueError('Informe ao menos um campo para atualizar.')
+        return self._http.patch(f'onboarding/flows/{slug}/', json=fields)
+
     def get_analytics(self, slug: str) -> FlowAnalytics:
         """Retorna analytics e métricas de um flow (requer api_token)."""
         data = self._http.get(f'onboarding/flows/{slug}/analytics/')
@@ -355,3 +447,70 @@ class OnboardingModule:
         params = {'page': page, 'page_size': page_size}
         data = self._http.get(f'onboarding/flows/{slug}/progress/', params=params)
         return data.get('results', data) if isinstance(data, dict) else data
+
+    def get_email_rules(self, slug: str) -> list[dict]:
+        """Regras de e-mail automático do flow, ativas ou não (requer api_token)."""
+        return self._http.get(f'onboarding/flows/{slug}/email-rules/')
+
+    @staticmethod
+    def _email_log_filters(
+        status: str | None,
+        event_type: str | None,
+        user_id: str | None,
+        created_after: datetime | str | None,
+        created_before: datetime | str | None,
+    ) -> dict:
+        params = {
+            'status': status,
+            'event_type': event_type,
+            'external_user_id': user_id,
+            'created_after': created_after.isoformat() if isinstance(created_after, datetime) else created_after,
+            'created_before': created_before.isoformat() if isinstance(created_before, datetime) else created_before,
+        }
+        return {key: value for key, value in params.items() if value}
+
+    def list_email_logs(
+        self,
+        slug: str,
+        status: str | None = None,
+        event_type: str | None = None,
+        user_id: str | None = None,
+        created_after: datetime | str | None = None,
+        created_before: datetime | str | None = None,
+        page: int = 1,
+        page_size: int = 50,
+    ) -> list[dict]:
+        """
+        E-mails gerados para os usuários do flow, do mais recente ao mais
+        antigo, sem o corpo da mensagem (requer api_token).
+
+        Args:
+            slug: Slug do flow.
+            status: pending, queued, sent, failed ou skipped.
+            event_type: Evento da regra (ex.: flow_started, flow_completed, reminder).
+            user_id: ID do usuário no sistema externo.
+            created_after / created_before: data (ex.: "2026-10-01") ou datetime.
+        """
+        params = self._email_log_filters(status, event_type, user_id, created_after, created_before)
+        params.update(page=page, page_size=page_size)
+        data = self._http.get(f'onboarding/flows/{slug}/email-logs/', params=params)
+        return data.get('results', data) if isinstance(data, dict) else data
+
+    def get_email_logs_summary(
+        self,
+        slug: str,
+        status: str | None = None,
+        event_type: str | None = None,
+        user_id: str | None = None,
+        created_after: datetime | str | None = None,
+        created_before: datetime | str | None = None,
+    ) -> dict:
+        """
+        Totais dos e-mails do flow por tipo de evento: por status, aberturas,
+        cliques e bounces (requer api_token). Aceita os filtros de list_email_logs.
+
+        Retorno: ``{"total": int, "by_event_type": [{"event_type", "total",
+        "opened", "clicked", "bounced", "by_status": {...}}, ...]}``
+        """
+        params = self._email_log_filters(status, event_type, user_id, created_after, created_before)
+        return self._http.get(f'onboarding/flows/{slug}/email-logs/summary/', params=params)

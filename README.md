@@ -183,6 +183,29 @@ print(progress.step_data)           # {'welcome': {'accepted_terms': True}, ...}
 print(progress.completion_percentage)  # 75
 print(progress.flow_slug)           # 'onboarding-clientes'
 
+# Data real do evento (occurred_at): use quando enviar depois do fato
+# (fila, reprocessamento, carga retroativa). Aceita datetime com fuso ou
+# string ISO 8601; datetime sem fuso gera ValueError. Sem ele, vale o
+# horário do servidor. Disponível em start_flow, start_step, complete_step,
+# skip_step, update_metadata, complete_flow, restart_flow, abandon_flow e
+# em cada item de complete_steps.
+from datetime import datetime, timezone
+
+progress = client.onboarding.complete_step(
+    user_id="user-123",
+    flow_key=FLOW,
+    step_key="welcome",
+    occurred_at=datetime(2026, 10, 20, 12, 30, tzinfo=timezone.utc),
+)
+progress = client.onboarding.complete_steps(
+    user_id="user-123",
+    flow_key=FLOW,
+    steps=[
+        {"step_key": "config", "occurred_at": "2026-10-20T09:30:00-03:00"},
+        {"step_key": "test", "occurred_at": datetime.now(timezone.utc)},
+    ],
+)
+
 # Ações no flow
 client.onboarding.complete_flow(user_id="user-123", flow_key=FLOW)
 client.onboarding.restart_flow(user_id="user-123", flow_key=FLOW)
@@ -195,6 +218,22 @@ token = client.onboarding.get_widget_token(flow_key=FLOW, user_id="user-123", tt
 flows = client.onboarding.list_flows()
 analytics = client.onboarding.get_analytics(slug="meu-flow")
 progress_list = client.onboarding.list_progress(slug="meu-flow")
+
+# Admin: acompanhamento automático do flow (requer api_token com escrita)
+client.onboarding.update_flow(
+    "meu-flow",
+    step_stalled_after_hours=48,   # step iniciado e não concluído em 48 h = travado
+    email_deadline_days=30,        # prazo desde o início
+    auto_abandon_on_deadline=True, # marca ABANDONED quando o prazo vence
+)
+
+# Admin: e-mails automáticos de onboarding (requer api_token)
+rules = client.onboarding.get_email_rules("meu-flow")
+logs = client.onboarding.list_email_logs(
+    "meu-flow", status="failed", event_type="flow_completed", created_after="2026-10-01",
+)
+summary = client.onboarding.get_email_logs_summary("meu-flow")
+print(summary["total"], summary["by_event_type"])
 ```
 
 ## Exemplos de Uso
