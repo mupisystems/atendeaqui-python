@@ -426,12 +426,18 @@ class OnboardingModule:
             client.onboarding.update_flow(
                 'meu-flow',
                 step_stalled_after_hours=48,   # step iniciado e não concluído = travado
-                email_deadline_days=30,        # prazo desde o início (None = sem prazo)
-                auto_abandon_on_deadline=True, # abandona o progresso ao vencer o prazo
+                email_deadline_days=30,          # sem e-mails depois de 30 dias do início (None = sem prazo)
+                abandon_after_inactive_days=30,  # abandona quem fica 30 dias sem atividade (None = nunca)
             )
 
+        E-mails do flow: email_provider_config (id do provedor, ex.: Postmark do
+        produto), email_from_name, email_blocks, email_dimensions,
+        email_message_stream e email_brand ({"logo_url", "color", "signature",
+        "footer"}). Cada um altera só a sua chave no flow_config; None a remove.
+
         Também aceita os demais campos editáveis do flow (name, description,
-        is_active, flow_config...).
+        is_active...). Evite mandar flow_config inteiro: ele substitui todas as
+        chaves.
         """
         if not fields:
             raise ValueError('Informe ao menos um campo para atualizar.')
@@ -514,3 +520,182 @@ class OnboardingModule:
         """
         params = self._email_log_filters(status, event_type, user_id, created_after, created_before)
         return self._http.get(f'onboarding/flows/{slug}/email-logs/summary/', params=params)
+
+    # =========================================================================
+    # E-MAILS: REGRAS, PEÇAS E DESCADASTRO (requer api_token)
+    # =========================================================================
+
+    def create_email_rule(self, slug: str, event_type: str, **fields) -> dict:
+        """
+        Cria a regra de e-mail de um evento (uma por evento). Começa em
+        simulação: o e-mail é montado e registrado, sem ir para o destinatário.
+
+        Campos opcionais: is_enabled, send_mode ("simulate" ou "send"),
+        email_provider_config, delay_minutes, reminder_after_hours (obrigatório
+        para "reminder"), max_reminders, send_only_business_hours.
+        """
+        return self._http.post(f'onboarding/flows/{slug}/email-rules/', json={'event_type': event_type, **fields})
+
+    def update_email_rule(self, slug: str, rule_id: int, **fields) -> dict:
+        """
+        Altera campos da regra. send_mode="send" exige provedor (na regra ou
+        no flow), email_from_name e email_brand.footer no flow.
+        """
+        if not fields:
+            raise ValueError('Informe ao menos um campo para atualizar.')
+        return self._http.patch(f'onboarding/flows/{slug}/email-rules/{rule_id}/', json=fields)
+
+    def delete_email_rule(self, slug: str, rule_id: int) -> None:
+        """Exclui a regra de e-mail."""
+        self._http.delete(f'onboarding/flows/{slug}/email-rules/{rule_id}/')
+
+    def list_email_pieces(
+        self,
+        slug: str,
+        block: str | None = None,
+        event_type: str | None = None,
+        step_key: str | None = None,
+        status: str | None = None,
+        language: str | None = None,
+        conditions: dict | None = None,
+        page: int = 1,
+        page_size: int = 50,
+    ) -> list[dict]:
+        """
+        Peças de e-mail do flow.
+
+        Args:
+            status: draft, approved ou archived.
+            conditions: filtra por condição, ex.: {"segment": "estetica"}.
+        """
+        params: dict = {
+            'block': block, 'event_type': event_type, 'step_key': step_key,
+            'status': status, 'language': language, 'page': page, 'page_size': page_size,
+        }
+        params = {key: value for key, value in params.items() if value is not None}
+        if conditions:
+            params['condition'] = [f'{key}:{value}' for key, value in conditions.items()]
+        data = self._http.get(f'onboarding/flows/{slug}/email-pieces/', params=params)
+        return data.get('results', data) if isinstance(data, dict) else data
+
+    def get_email_piece(self, slug: str, piece_id: int) -> dict:
+        """Detalhe da peça, com o histórico de versões e os problemas que impedem aprovar."""
+        return self._http.get(f'onboarding/flows/{slug}/email-pieces/{piece_id}/')
+
+    def create_email_piece(
+        self,
+        slug: str,
+        block: str,
+        body: str,
+        subject: str | None = None,
+        event_type: str | None = None,
+        step_key: str | None = None,
+        conditions: dict | None = None,
+        language: str | None = None,
+        preheader: str | None = None,
+        cta_label: str | None = None,
+        source: str | None = None,
+    ) -> dict:
+        """
+        Cria uma peça em rascunho.
+
+        Args:
+            block: "corpo" (o e-mail, exige subject) ou outro bloco do flow
+                (flow_config.email_blocks), usado no corpo como {BLOCO:nome}.
+            body: texto com variáveis {NOME}, {ETAPA}, {LINK_ETAPA},
+                {PROGRESSO}, {DADO:chave} e, no corpo, {BLOCO:nome}.
+            event_type / step_key / conditions: onde a peça vale (vazio = sempre).
+            language: padrão, o idioma do flow.
+            source: "manual" (padrão) ou "ai".
+        """
+        body_data: dict = {'block': block, 'body': body}
+        optional = {
+            'subject': subject, 'event_type': event_type, 'step_key': step_key, 'conditions': conditions,
+            'language': language, 'preheader': preheader, 'cta_label': cta_label, 'source': source,
+        }
+        body_data.update({key: value for key, value in optional.items() if value is not None})
+        return self._http.post(f'onboarding/flows/{slug}/email-pieces/', json=body_data)
+
+    def update_email_piece(self, slug: str, piece_id: int, **fields) -> dict:
+        """
+        Edita a peça. Rascunho: altera no lugar. Aprovada ou arquivada: a API
+        cria uma nova versão em rascunho e a devolve (o "id" muda); a aprovada
+        segue valendo até a nova ser aprovada.
+        """
+        if not fields:
+            raise ValueError('Informe ao menos um campo para atualizar.')
+        return self._http.patch(f'onboarding/flows/{slug}/email-pieces/{piece_id}/', json=fields)
+
+    def delete_email_piece(self, slug: str, piece_id: int) -> None:
+        """Exclui um rascunho (peças aprovadas são arquivadas com archive_email_piece)."""
+        self._http.delete(f'onboarding/flows/{slug}/email-pieces/{piece_id}/')
+
+    def approve_email_piece(self, slug: str, piece_id: int) -> dict:
+        """
+        Aprova a peça e arquiva a aprovada anterior da mesma chave.
+
+        Raises:
+            ValidationError: a peça tem problemas (variável ou bloco
+                desconhecido, condição fora de email_dimensions...); a lista
+                completa está em ``exc.response.json()["problems"]``.
+        """
+        return self._http.post(f'onboarding/flows/{slug}/email-pieces/{piece_id}/approve/')
+
+    def archive_email_piece(self, slug: str, piece_id: int) -> dict:
+        """Tira a peça de uso."""
+        return self._http.post(f'onboarding/flows/{slug}/email-pieces/{piece_id}/archive/')
+
+    def preview_email(
+        self,
+        slug: str,
+        event_type: str,
+        step_key: str | None = None,
+        user_id: str | None = None,
+        name: str | None = None,
+        metadata: dict | None = None,
+        steps_completed: list[str] | None = None,
+        language: str | None = None,
+        include_drafts: bool = True,
+    ) -> dict:
+        """
+        Monta o e-mail de um evento como sairia, sem enviar.
+
+        Com user_id usa o progresso real do usuário; sem ele, um usuário de
+        exemplo (name, metadata, steps_completed, language). Por padrão inclui
+        rascunhos, para revisar antes de aprovar.
+
+        Retorno: subject, preheader, body_text, body_html, language,
+        missing_reason, pieces (id, block, version, status) e choices (por que
+        cada peça foi escolhida).
+        """
+        body: dict = {'event_type': event_type, 'include_drafts': include_drafts}
+        optional = {
+            'step_key': step_key, 'external_user_id': user_id, 'name': name, 'metadata': metadata,
+            'steps_completed': steps_completed, 'language': language,
+        }
+        body.update({key: value for key, value in optional.items() if value is not None})
+        return self._http.post(f'onboarding/flows/{slug}/email-pieces/preview/', json=body)
+
+    def get_email_coverage(self, slug: str, language: str | None = None) -> dict:
+        """
+        Cobertura das peças: por chave (bloco, evento, etapa, condições), a
+        versão aprovada e o rascunho em aberto. events_without_generic_body
+        lista regras ativas em que parte dos usuários ficaria sem e-mail.
+        """
+        params = {'language': language} if language else None
+        return self._http.get(f'onboarding/flows/{slug}/email-pieces/coverage/', params=params)
+
+    def set_email_subscription(self, slug: str, user_id: str, unsubscribed: bool) -> dict:
+        """
+        Cancela (True) ou reativa (False) os e-mails de onboarding de um
+        usuário, para sincronizar a preferência que ele marcou no produto.
+        Cancelar também descarta os e-mails na fila. Reativar só com o
+        consentimento da pessoa.
+
+        Retorno: external_user_id, email_unsubscribed, email_unsubscribed_at,
+        email_unsubscribed_source.
+        """
+        return self._http.patch(
+            f'onboarding/flows/{slug}/progress/{user_id}/email-subscription/',
+            json={'unsubscribed': bool(unsubscribed)},
+        )
