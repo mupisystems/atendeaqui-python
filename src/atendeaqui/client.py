@@ -18,6 +18,8 @@ from __future__ import annotations
 
 from ._http import HttpClient
 from .clients import ClientsModule
+from .crm import CrmModule
+from .engagement import EngagementModule
 from .onboarding import OnboardingModule
 
 PRODUCTION_URL = 'https://api.atendeaqui.com.br/v1'
@@ -30,6 +32,8 @@ class AtendeAquiClient:
 
     Expõe módulos como atributos:
     - client.clients — API de Clientes (requer api_token)
+    - client.crm — API de CRM (requer api_token)
+    - client.engagement — API de Engajamento de Uso (requer api_token)
     - client.onboarding — API de Onboarding
 
     Args:
@@ -73,12 +77,24 @@ class AtendeAquiClient:
 
         # Inicializar módulos
         self._clients = ClientsModule(self._http)
+        self._crm = CrmModule(self._http)
+        self._engagement = EngagementModule(self._http)
         self._onboarding = OnboardingModule(self._http, default_flow_key=flow_key)
 
     @property
     def clients(self) -> ClientsModule:
         """Módulo de Clientes — CRUD de clientes e equipe (requer api_token)."""
         return self._clients
+
+    @property
+    def crm(self) -> CrmModule:
+        """Módulo de CRM — empresas do CRM pelo platform_id (requer api_token)."""
+        return self._crm
+
+    @property
+    def engagement(self) -> EngagementModule:
+        """Módulo de Engajamento de Uso — eventos de login e telas (requer api_token)."""
+        return self._engagement
 
     @property
     def onboarding(self) -> OnboardingModule:

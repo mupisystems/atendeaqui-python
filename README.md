@@ -122,6 +122,72 @@ admin.clients.update_team_member(novo.client_id, member.id, can_edit_client=True
 admin.clients.remove_team_member(novo.client_id, member.id)
 ```
 
+### CRM (requer api_token)
+
+Empresas do CRM, identificadas pelo `platform_id` (o id da empresa no seu sistema).
+A plataforma é a fonte da verdade: os campos enviados sobrescrevem os do CRM, os omitidos não mudam.
+
+```python
+admin = AtendeAquiClient(api_token="seu-bearer-token")
+
+# Cria ou atualiza pelo platform_id (chamar de novo não duplica)
+empresa = admin.crm.upsert_company(
+    platform_id="1842",
+    name="Construtora Alfa",   # único por organização: nome em uso por outra empresa → ValidationError (409)
+    status="cliente",          # prospect, trial, cliente ou churned
+    mrr="349.90",
+)
+
+# Só o nome: status e MRR não mudam
+admin.crm.upsert_company(platform_id="1842", name="Construtora Alfa Ltda")
+
+# mrr=None limpa o MRR (diferente de omitir)
+admin.crm.upsert_company(platform_id="1842", name="Construtora Alfa", status="churned", mrr=None)
+```
+
+### Engajamento de uso (requer api_token)
+
+Eventos de `login` e `page_view` por empresa e usuário. Sessões, tempo por tela e frequência
+são calculados no AtendeAqui. A empresa precisa existir no CRM antes dos eventos dela.
+
+```python
+import uuid
+from datetime import datetime, timezone
+
+# Um evento (event_id e occurred_at são gerados se omitidos)
+admin.engagement.track(type="login", company_platform_id="1842", user_id="77")
+
+# Lote de 1 a 500 eventos
+result = admin.engagement.track_batch([
+    {
+        "type": "page_view",
+        "company_platform_id": "1842",
+        "user_id": "77",
+        "feature": "employers:job_list",          # chave estável da tela (^[a-z0-9_.:-]+$)
+        "feature_name": "Processos seletivos",    # nome exibido; pode mudar
+        # Numa fila, gere estes dois ao enfileirar e reenvie sempre os mesmos:
+        "event_id": str(uuid.uuid4()),
+        "occurred_at": datetime.now(timezone.utc),
+    },
+])
+
+result.accepted     # novos gravados
+result.duplicates   # event_id já recebido (reenvio): não é erro
+for error in result.errors:
+    if error.is_company_not_found:
+        ...  # admin.crm.upsert_company(...) e reenvie com o MESMO event_id
+    else:
+        ...  # não se resolve sozinho: registre e descarte
+```
+
+| Resultado | O que fazer |
+|---|---|
+| `accepted` / `duplicates` | Remova o evento da fila |
+| `error.is_company_not_found` | Cadastre a empresa e reenvie com o mesmo `event_id` |
+| Outros `errors` | Registre e descarte |
+| `ServerError`, `RateLimitError`, timeout | Reenvie o lote inteiro, com os mesmos `event_id` |
+| `AuthenticationError` | Token inválido: pare e alerte |
+
 ### Onboarding
 
 ```python
@@ -223,8 +289,8 @@ progress_list = client.onboarding.list_progress(slug="meu-flow")
 client.onboarding.update_flow(
     "meu-flow",
     step_stalled_after_hours=48,   # step iniciado e não concluído em 48 h = travado
-    email_deadline_days=30,        # prazo desde o início
-    auto_abandon_on_deadline=True, # marca ABANDONED quando o prazo vence
+    email_deadline_days=30,          # sem e-mails depois de 30 dias do início
+    abandon_after_inactive_days=30,  # marca ABANDONED após 30 dias sem atividade; atividade nova reativa
 )
 
 # Admin: e-mails automáticos de onboarding (requer api_token)
@@ -234,13 +300,20 @@ logs = client.onboarding.list_email_logs(
 )
 summary = client.onboarding.get_email_logs_summary("meu-flow")
 print(summary["total"], summary["by_event_type"])
+
+# Admin: regras, peças de texto e descadastro (ver "E-mails de onboarding")
+client.onboarding.create_email_rule("meu-flow", "step_stalled")
+piece = client.onboarding.create_email_piece("meu-flow", "corpo", "Olá, {NOME}!", subject="Falta pouco")
+client.onboarding.preview_email("meu-flow", "step_stalled", step_key="first-appointment")
+client.onboarding.approve_email_piece("meu-flow", piece["id"])
+client.onboarding.set_email_subscription("meu-flow", "user-123", unsubscribed=True)
 ```
 
 ## Exemplos de Uso
 
 ### Fluxo completo com dados de perfil
 
-Quanto mais dados você enviar no `metadata` e `step_data`, mais personalizados serão os e-mails automáticos enviados pelo sistema. O sistema de e-mails usa IA para gerar conteúdo baseado no perfil e caso de uso do cliente.
+Os dados do `metadata` e do `step_data` alimentam os relatórios e os e-mails automáticos (variáveis como `{DADO:company}` e condições das peças; ver [E-mails de onboarding](#e-mails-de-onboarding)).
 
 ```python
 from atendeaqui import AtendeAquiClient
@@ -248,21 +321,19 @@ from atendeaqui import AtendeAquiClient
 client = AtendeAquiClient(flow_key="uuid-do-flow")
 
 # 1. Iniciar o flow com metadata do usuário
-#    Esses dados são usados pela IA para personalizar e-mails de boas-vindas
+#    Esses dados entram nos relatórios e nos e-mails (variáveis e condições das peças)
 progress = client.onboarding.start_flow(
     user_id="empresa-456",
     name="João Silva",
     email="joao@agendapro.com.br",
     metadata={
         "company": "AgendaPro",
-        "sector": "tecnologia",
-        "role": "CTO",
-        "plan": "professional",
+        "segment": "tecnologia",
+        "plan_code": "professional",
         "preferred_language": "pt-BR",
     },
 )
-# >>> E-mail de boas-vindas é enviado automaticamente (se configurado)
-# >>> A IA usa nome, empresa e cargo para personalizar a saudação
+# >>> E-mail de boas-vindas é montado com as peças aprovadas (se houver regra para flow_started)
 
 # 2. Completar etapa de perfil com caso de uso
 #    step_data é JSON livre — envie tudo que descreve o cenário do cliente
@@ -419,7 +490,7 @@ def get_onboarding_token(request):
 
 ### Atualizar metadata em tempo real
 
-Use `update_metadata` para enriquecer o perfil do cliente conforme ele interage com o sistema. Esses dados são usados pela IA nos e-mails de lembrete e parabéns.
+Use `update_metadata` para enriquecer o perfil do cliente conforme ele interage com o sistema. Os e-mails seguintes já usam os valores novos (variáveis e condições das peças).
 
 ```python
 # Quando o cliente atualiza o plano
@@ -469,39 +540,109 @@ progress_list = admin_client.onboarding.list_progress(
 )
 ```
 
-## Referência: step_data e e-mails automáticos
+## E-mails de onboarding
 
-O sistema de automação de e-mails usa IA para gerar conteúdo personalizado. Quanto mais dados você enviar via `step_data` e `metadata`, melhor a personalização.
+Os e-mails não são gerados na hora: são montados a partir de **peças de texto aprovadas** e saem pelo
+provedor e domínio do seu produto. Nada é enviado sem aprovação.
 
-### Parâmetros diretos do `start_flow`
+### 1. Configurar o flow (uma vez)
 
-| Parâmetro | Exemplo | Uso |
-|-----------|---------|-----|
-| `flow_key` | `"f47ac10b-..."` | UUID público do flow (obrigatório se não definido no client) |
-| `name` | `"João Silva"` | Saudação nos e-mails, busca no admin |
-| `email` | `"joao@acme.com"` | Destinatário dos e-mails automáticos |
-| `client_id` | `"uuid-do-cliente"` | Opcional. Vincula o onboarding ao cliente (para tickets de suporte) |
+```python
+client.onboarding.update_flow(
+    "meu-flow",
+    email_provider_config=12,             # provedor (ex.: Postmark do produto) cadastrado no AtendeAqui
+    email_from_name="Minha Agenda",
+    email_brand={
+        "logo_url": "https://minhaagenda.com.br/static/email/logo.png",
+        "color": "#1F6FEB",
+        "signature": "Equipe Minha Agenda",
+        "footer": "Minha Agenda · Rua Exemplo, 100 · Cidade/UF",   # obrigatório para envio real
+    },
+    email_blocks=["corpo", "etapa", "dica"],   # blocos do e-mail; "corpo" sempre existe
+    email_dimensions=["segment"],              # metadados que podem variar o texto
+)
+```
 
-### Dados recomendados no `metadata` (start_flow)
+### 2. Escrever e aprovar as peças
 
-| Campo | Exemplo | Uso nos e-mails |
-|-------|---------|--------------------|
-| `company` | `"AgendaPro"` | Contextualizar a empresa |
-| `sector` | `"tecnologia"` | Adaptar linguagem ao setor |
-| `role` | `"CTO"` | Tom e nível técnico adequado |
-| `plan` | `"professional"` | Sugestões baseadas no plano |
-| `preferred_language` | `"pt-BR"` | Idioma do e-mail |
+Cada e-mail tem o bloco `corpo` (assunto e texto) e os outros blocos do flow, que entram no corpo por
+`{BLOCO:nome}`. Cada peça vale para um evento, uma etapa e/ou valores de metadados; para cada bloco,
+vale a peça aprovada **mais específica** que combina com o usuário, e a genérica cobre o resto.
 
-### Dados recomendados no `step_data` (complete_step)
+```python
+FLOW = "meu-flow"
 
-| Step | Campos sugeridos | Uso nos e-mails |
-|------|------------------|--------------------|
-| Perfil/Caso de uso | `uso_pretendido`, `tamanho_equipe`, `frequencia_uso` | "Como você vai usar para reuniões de vendas com 10 pessoas..." |
-| Configuração técnica | `provider`, `webhook_url` | "Você já configurou a integração com Google Calendar..." |
-| Equipe | `membros_convidados`, `emails` | "Você convidou 5 membros — falta apenas personalizar a agenda" |
-| Personalização | `horario_inicio`, `horario_fim`, `duracao_padrao` | "Sua agenda está configurada para atendimentos de 30min..." |
+client.onboarding.create_email_piece(
+    FLOW, "corpo",
+    "Olá, {NOME}!\n\nVocê parou em {ETAPA}.\n\n{BLOCO:etapa}\n\n{BLOCO:dica}",
+    subject="{NOME}, falta pouco para abrir sua agenda",
+    event_type="step_stalled",
+    cta_label="Continuar",
+)
+client.onboarding.create_email_piece(FLOW, "etapa", "Crie um horário e mande o link para um cliente.",
+                                     step_key="first-appointment")
+client.onboarding.create_email_piece(FLOW, "dica", "Clínicas costumam liberar o agendamento pelo WhatsApp.",
+                                     step_key="first-appointment", conditions={"segment": "saude"})
 
-> **Dica:** Campos com nomes como `token`, `password`, `secret`, `key` e `credential` são automaticamente mascarados nos prompts da IA por segurança.
+# Revisar como o e-mail sairia (inclui rascunhos)
+preview = client.onboarding.preview_email(FLOW, "step_stalled", step_key="first-appointment",
+                                          name="Bia", metadata={"segment": "saude"})
+print(preview["subject"], preview["body_text"], preview["choices"])
+
+for piece in client.onboarding.list_email_pieces(FLOW, status="draft"):
+    client.onboarding.approve_email_piece(FLOW, piece["id"])
+
+# O que falta: regras ativas sem um corpo genérico aprovado
+print(client.onboarding.get_email_coverage(FLOW)["events_without_generic_body"])
+```
+
+Editar uma peça aprovada cria uma nova versão em rascunho; a aprovada continua valendo até a nova ser
+aprovada.
+
+**Variáveis:** `{NOME}` (primeiro nome), `{ETAPA}` (título da etapa em foco), `{LINK_ETAPA}`
+(`step_config.action_url` da etapa), `{PROGRESSO}` ("2 de 5 etapas"), `{DADO:chave}` (qualquer
+metadado). Uma linha cuja variável fica vazia sai inteira do e-mail. O botão usa `cta_label` e o link da
+etapa; sem link, não há botão.
+
+**Etapa em foco por evento:** `flow_started`, a primeira obrigatória; `step_completed` e `reminder`, a
+próxima obrigatória pendente; `step_stalled`, a etapa travada; `flow_completed`, nenhuma.
+
+### 3. Ligar as regras
+
+```python
+rule = client.onboarding.create_email_rule(FLOW, "step_stalled")    # começa em simulação
+# ... confira os e-mails montados em list_email_logs / get_email_logs_summary ...
+client.onboarding.update_email_rule(FLOW, rule["id"], send_mode="send")
+```
+
+Em simulação o e-mail é montado e fica no registro, sem ir para o destinatário.
+
+### Descadastro
+
+Todo e-mail leva um link de descadastro (com confirmação) e o cabeçalho de descadastro em um clique do
+Gmail e do Yahoo. Para sincronizar a preferência que o usuário marcou no seu produto:
+
+```python
+client.onboarding.set_email_subscription(FLOW, "user-123", unsubscribed=True)    # cancela e esvazia a fila
+client.onboarding.set_email_subscription(FLOW, "user-123", unsubscribed=False)   # só com consentimento
+```
+
+Quando o usuário cancela pelo e-mail, os webhooks do flow recebem o evento `email_unsubscribed`, e o
+progresso traz `email_unsubscribed=True`.
+
+### Dados recomendados no `start_flow`
+
+| Campo | Exemplo | Uso |
+|-------|---------|-----|
+| `name` | `"João Silva"` | `{NOME}` nos e-mails (não envie o e-mail no lugar do nome) |
+| `email` | `"joao@acme.com"` | Destinatário |
+| `metadata.company` | `"AgendaPro"` | `{DADO:company}` |
+| `metadata.segment` | `"saude"` | Condição das peças, se estiver em `email_dimensions` |
+| `metadata.plan_code` | `"trial"` | Idem |
+| `metadata.preferred_language` | `"pt-BR"` | Idioma das peças (cai no idioma do flow se não houver) |
+| `metadata.is_test` | `True` | Conta interna ou de teste: não recebe e-mail |
+
+Use valores fixos em minúsculas nos metadados e no `step_data` (ex.: `"saude"`, não `"Saúde"`/`"saude "`).
 
 ## Tratamento de Erros
 
@@ -551,6 +692,12 @@ atendeaqui/
 ├── clients/             # Módulo de Clientes
 │   ├── __init__.py      # ClientsModule
 │   └── models.py        # Client, TeamMember
+├── crm/                 # Módulo de CRM
+│   ├── __init__.py      # CrmModule
+│   └── models.py        # Company
+├── engagement/          # Módulo de Engajamento de Uso
+│   ├── __init__.py      # EngagementModule
+│   └── models.py        # UsageResult, UsageError
 └── onboarding/          # Módulo de Onboarding
     ├── __init__.py      # OnboardingModule
     └── models.py        # FlowStructure, UserProgress, etc.
