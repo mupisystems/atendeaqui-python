@@ -678,8 +678,28 @@ AtendeAquiError
 │   └── StepNotSkippableError
 ├── OriginNotAllowedError  # CORS
 ├── RateLimitError         # 429
-└── ServerError            # 5xx
+├── ServerError            # 5xx
+└── NetworkError           # sem resposta: rede fora ou tempo esgotado
 ```
+
+### Tentar de novo ou desistir
+
+`is_retryable` diz se tentar de novo pode dar certo: `True` em `ServerError`, `RateLimitError`
+e `NetworkError`; `False` nos demais (dado inválido, token errado ou recurso inexistente não
+mudam com o tempo).
+
+```python
+try:
+    admin.crm.upsert_company(platform_id="1842", name="Construtora Alfa")
+except AtendeAquiError as e:
+    if e.is_retryable:
+        ...  # tente de novo mais tarde (ex.: self.retry numa task Celery)
+    else:
+        ...  # registre e desista
+```
+
+`NetworkError` também é uma `requests.RequestException`: um `except` antigo para os erros do
+`requests` continua funcionando.
 
 ## Estrutura do Pacote
 

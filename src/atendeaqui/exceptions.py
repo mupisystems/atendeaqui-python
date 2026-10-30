@@ -6,11 +6,16 @@ Todas as exceções herdam de AtendeAquiError, que fornece:
 - code: código de erro da API (ex: STEP_NOT_FOUND)
 - status_code: HTTP status code da resposta
 - response: objeto Response original (quando disponível)
+- is_retryable: True quando tentar de novo pode dar certo (5xx, 429, rede)
 """
+import requests
 
 
 class AtendeAquiError(Exception):
     """Exceção base para todos os erros do SDK."""
+
+    # Tentar de novo resolve? Só as subclasses de erro passageiro dizem que sim
+    is_retryable = False
 
     def __init__(self, message, code=None, status_code=None, response=None):
         self.message = message
@@ -55,12 +60,21 @@ class OriginNotAllowedError(AtendeAquiError):
 
 class RateLimitError(AtendeAquiError):
     """Limite de requisições excedido (429)."""
-    pass
+    is_retryable = True
 
 
 class ServerError(AtendeAquiError):
     """Erro interno do servidor (5xx)."""
-    pass
+    is_retryable = True
+
+
+class NetworkError(AtendeAquiError, requests.exceptions.RequestException):
+    """Falha de rede: servidor fora do ar, conexão recusada ou tempo esgotado.
+
+    Também é uma `requests.RequestException`: quem já capturava os erros do
+    requests continua capturando.
+    """
+    is_retryable = True
 
 
 # Mapeamento de códigos da API para classes de exceção

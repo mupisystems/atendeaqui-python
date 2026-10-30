@@ -15,6 +15,7 @@ from ._version import __version__
 from .exceptions import (
     AtendeAquiError,
     AuthenticationError,
+    NetworkError,
     NotFoundError,
     RateLimitError,
     ServerError,
@@ -102,14 +103,18 @@ class HttpClient:
         """Executa requisição HTTP e retorna dados JSON da resposta."""
         url = self._build_url(path)
 
-        response = self._session.request(
-            method=method,
-            url=url,
-            json=json,
-            params=params,
-            headers=headers,
-            timeout=self._timeout,
-        )
+        try:
+            response = self._session.request(
+                method=method,
+                url=url,
+                json=json,
+                params=params,
+                headers=headers,
+                timeout=self._timeout,
+            )
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as exc:
+            # Sem resposta do servidor: vira erro do SDK, que diz se vale tentar de novo
+            raise NetworkError(f'Falha de rede: {exc}', code='NETWORK_ERROR') from exc
 
         if not response.ok:
             self._handle_error(response)

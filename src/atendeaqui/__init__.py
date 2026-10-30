@@ -23,6 +23,7 @@ from .exceptions import (
     OriginNotAllowedError,
     RateLimitError,
     ServerError,
+    NetworkError,
 )
 from .clients.models import Client, TeamMember
 from .crm.models import Company
@@ -48,6 +49,7 @@ __all__ = [
     'OriginNotAllowedError',
     'RateLimitError',
     'ServerError',
+    'NetworkError',
     # Models - Clients
     'Client',
     'TeamMember',
