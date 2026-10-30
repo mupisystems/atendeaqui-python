@@ -4,7 +4,7 @@ import json
 import pytest
 import responses
 
-from atendeaqui import AtendeAquiClient, Client, TeamMember, NotFoundError
+from atendeaqui import AtendeAquiClient, Client, TeamMember, NotFoundError, ServerError
 
 BASE_URL = 'https://test.atendeaqui.com.br'
 
@@ -181,6 +181,60 @@ class TestClientsCreate:
         body = json.loads(responses.calls[0].request.body)
         assert body['client_id'] == 'meu-sistema-123'
         assert body['full_name'] == 'Acme Corp'
+
+
+class TestClientsGetOrCreate:
+    @responses.activate
+    def test_existing_client_is_not_created_again(self, admin_client):
+        responses.add(
+            responses.GET,
+            f'{BASE_URL}/api/clients/abc-123-uuid/',
+            json=CLIENT_DATA,
+            status=200,
+        )
+
+        cliente, criado = admin_client.clients.get_or_create('abc-123-uuid', full_name='Acme Corp')
+
+        assert cliente.client_id == 'abc-123-uuid'
+        assert criado is False
+        assert len(responses.calls) == 1  # só o GET: nenhum POST
+
+    @responses.activate
+    def test_missing_client_is_created_with_the_same_client_id(self, admin_client):
+        responses.add(
+            responses.GET,
+            f'{BASE_URL}/api/clients/abc-123-uuid/',
+            json={'detail': 'Not found.'},
+            status=404,
+        )
+        responses.add(
+            responses.POST,
+            f'{BASE_URL}/api/clients/',
+            json=CLIENT_DATA,
+            status=201,
+        )
+
+        cliente, criado = admin_client.clients.get_or_create(
+            'abc-123-uuid', full_name='Acme Corp', email='contato@acme.com',
+        )
+
+        assert criado is True
+        body = json.loads(responses.calls[1].request.body)
+        assert body == {'full_name': 'Acme Corp', 'client_id': 'abc-123-uuid', 'email': 'contato@acme.com'}
+
+    @responses.activate
+    def test_other_errors_are_not_swallowed(self, admin_client):
+        responses.add(
+            responses.GET,
+            f'{BASE_URL}/api/clients/abc-123-uuid/',
+            json={'detail': 'Erro interno.'},
+            status=500,
+        )
+
+        with pytest.raises(ServerError):
+            admin_client.clients.get_or_create('abc-123-uuid', full_name='Acme Corp')
+
+        assert len(responses.calls) == 1  # não tentou criar
 
 
 class TestClientsUpdate:

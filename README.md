@@ -96,6 +96,15 @@ novo = admin.clients.create(
     client_id="meu-sistema-123",  # opcional: usa o ID do seu sistema local
 )
 
+# Buscar pelo ID do seu sistema e criar só se não existir.
+# Use este em vez de create() quando o client_id vem do seu sistema:
+# o AtendeAqui aceita dois clientes com o mesmo client_id.
+cliente, criado = admin.clients.get_or_create(
+    "meu-sistema-123",
+    full_name="Acme Corp",          # usado só se for criar
+    email="contato@acme.com",
+)
+
 # Detalhes do cliente
 cliente = admin.clients.get(client_id=novo.client_id)
 
