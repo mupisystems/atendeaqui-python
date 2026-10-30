@@ -174,7 +174,8 @@ result = admin.engagement.track_batch([
         "user_id": "77",
         "feature": "employers:job_list",          # chave estável da tela (^[a-z0-9_.:-]+$)
         "feature_name": "Processos seletivos",    # nome exibido; pode mudar
-        # Numa fila, gere estes dois ao enfileirar e reenvie sempre os mesmos:
+        # Numa fila, gere estes dois ao enfileirar e reenvie sempre os mesmos
+        # (o UsageBuffer, abaixo, faz isso):
         "event_id": str(uuid.uuid4()),
         "occurred_at": datetime.now(timezone.utc),
     },
@@ -196,6 +197,30 @@ for error in result.errors:
 | Outros `errors` | Registre e descarte |
 | `ServerError`, `RateLimitError`, timeout | Reenvie o lote inteiro, com os mesmos `event_id` |
 | `AuthenticationError` | Token inválido: pare e alerte |
+
+#### Enviar em lote, fora da requisição: `UsageBuffer`
+
+Para não fazer uma chamada HTTP a cada tela aberta, anote os eventos num bloquinho em memória.
+Uma thread esvazia o bloquinho a cada 10 segundos, ou antes, quando ele junta 100 eventos.
+
+```python
+from atendeaqui import UsageBuffer
+
+# Envio direto
+buffer = UsageBuffer(send=admin.engagement.track_batch)
+
+# Ou por uma fila (ex.: Celery): a task recebe o lote e chama track_batch
+buffer = UsageBuffer(send=lambda events: enviar_uso.delay(events))
+
+buffer.add(type="login", company_platform_id="1842", user_id="77")
+```
+
+- `add()` gera o `event_id` e o `occurred_at` na hora da anotação: reenviar o lote não conta duas vezes.
+- Os eventos chegam ao `send` só com texto, então podem ir por JSON.
+- Cada processo tem o seu bloquinho. Cheio (5000 eventos), o mais antigo sai.
+- Ao sair, o processo envia o que sobrou.
+- uWSGI: ligue `enable-threads`, senão a thread não roda.
+- Testes: `UsageBuffer(send=..., background=False)` não liga a thread; chame `buffer.flush()`.
 
 ### Onboarding
 
@@ -726,6 +751,7 @@ atendeaqui/
 │   └── models.py        # Company
 ├── engagement/          # Módulo de Engajamento de Uso
 │   ├── __init__.py      # EngagementModule
+│   ├── buffer.py        # UsageBuffer
 │   └── models.py        # UsageResult, UsageError
 └── onboarding/          # Módulo de Onboarding
     ├── __init__.py      # OnboardingModule

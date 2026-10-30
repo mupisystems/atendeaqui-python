@@ -14,8 +14,8 @@ Acessado via client.engagement:
 
 Contrato: AtendeAqui `docs/api-engagement-usage.md`, seção 4.
 
-Quem guarda eventos numa fila para enviar depois deve gerar o `event_id` ao
-enfileirar e passá-lo explicitamente: é ele que faz o reenvio não duplicar.
+Para anotar agora e enviar depois, use o UsageBuffer (engagement/buffer.py):
+ele gera o `event_id` na anotação, e é esse id que faz o reenvio não duplicar.
 """
 from __future__ import annotations
 

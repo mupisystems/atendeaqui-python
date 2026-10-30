@@ -13,6 +13,7 @@ Uso:
     progress = client.onboarding.complete_step(user_id="user-123", step_key="welcome")
 """
 from .client import AtendeAquiClient
+from .engagement.buffer import UsageBuffer
 from .exceptions import (
     AtendeAquiError,
     AuthenticationError,
@@ -39,6 +40,7 @@ from ._version import __version__
 
 __all__ = [
     'AtendeAquiClient',
+    'UsageBuffer',
     # Exceções
     'AtendeAquiError',
     'AuthenticationError',
