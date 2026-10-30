@@ -188,12 +188,21 @@ for error in result.errors:
         ...  # admin.crm.upsert_company(...) e reenvie com o MESMO event_id
     else:
         ...  # não se resolve sozinho: registre e descarte
+
+# Ou deixe o SDK cadastrar e reenviar: a função recebe os company_platform_id que
+# faltam no CRM; depois o SDK reenvia esses eventos uma vez, com o mesmo event_id
+def cadastrar_empresas(platform_ids):
+    for platform_id in platform_ids:
+        empresa = minhas_empresas[platform_id]
+        admin.crm.upsert_company(platform_id=platform_id, name=empresa.nome)
+
+result = admin.engagement.track_batch(eventos, on_company_missing=cadastrar_empresas)
 ```
 
 | Resultado | O que fazer |
 |---|---|
 | `accepted` / `duplicates` | Remova o evento da fila |
-| `error.is_company_not_found` | Cadastre a empresa e reenvie com o mesmo `event_id` |
+| `error.is_company_not_found` | Cadastre a empresa e reenvie com o mesmo `event_id` (ou passe `on_company_missing`) |
 | Outros `errors` | Registre e descarte |
 | `ServerError`, `RateLimitError`, timeout | Reenvie o lote inteiro, com os mesmos `event_id` |
 | `AuthenticationError` | Token inválido: pare e alerte |

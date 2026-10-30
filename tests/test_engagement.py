@@ -13,6 +13,7 @@ USAGE_URL = f'{BASE_URL}/api/engagement/usage/'
 
 EVENT_ID = '7c9e6679-7425-40de-944b-e07fc1f90ae7'
 OK = {'accepted': 1, 'duplicates': 0, 'errors': []}
+NOT_FOUND = 'empresa não encontrada'
 
 
 @pytest.fixture
@@ -144,3 +145,100 @@ class TestTrackBatch:
 
         with pytest.raises(ValidationError):
             admin_client.engagement.track_batch([page_view()])
+
+
+def body_events(mocked_responses, call):
+    return json.loads(mocked_responses.calls[call].request.body)['events']
+
+
+class TestCompanyMissing:
+
+    def test_missing_company_is_created_and_its_events_resent(self, admin_client, mocked_responses):
+        mocked_responses.add(responses.POST, USAGE_URL, status=201, json={
+            'accepted': 1, 'duplicates': 0,
+            'errors': [{'index': 1, 'event_id': 'e2', 'error': NOT_FOUND}],
+        })
+        mocked_responses.add(responses.POST, USAGE_URL, status=201, json=OK)
+        created = []
+
+        result = admin_client.engagement.track_batch(
+            [page_view(event_id='e1'), page_view(event_id='e2', company_platform_id='99')],
+            on_company_missing=created.extend,
+        )
+
+        assert created == ['99']
+        assert [event['event_id'] for event in body_events(mocked_responses, 1)] == ['e2']
+        assert result.accepted == 2
+        assert result.errors == []
+
+    def test_resend_keeps_the_event_id_generated_on_the_first_send(self, admin_client, mocked_responses):
+        mocked_responses.add(responses.POST, USAGE_URL, status=201, json={
+            'accepted': 0, 'duplicates': 0,
+            'errors': [{'index': 0, 'event_id': None, 'error': NOT_FOUND}],
+        })
+        mocked_responses.add(responses.POST, USAGE_URL, status=201, json=OK)
+
+        admin_client.engagement.track_batch([page_view()], on_company_missing=lambda ids: None)
+
+        [first] = body_events(mocked_responses, 0)
+        [resent] = body_events(mocked_responses, 1)
+        assert resent['event_id'] == first['event_id']
+        assert resent['occurred_at'] == first['occurred_at']
+
+    def test_error_index_of_the_resend_points_to_the_original_list(self, admin_client, mocked_responses):
+        mocked_responses.add(responses.POST, USAGE_URL, status=201, json={
+            'accepted': 2, 'duplicates': 0,
+            'errors': [{'index': 2, 'event_id': 'e3', 'error': NOT_FOUND}],
+        })
+        mocked_responses.add(responses.POST, USAGE_URL, status=201, json={
+            'accepted': 0, 'duplicates': 0,
+            'errors': [{'index': 0, 'event_id': 'e3', 'error': NOT_FOUND}],
+        })
+
+        result = admin_client.engagement.track_batch(
+            [page_view(event_id='e1'), page_view(event_id='e2'), page_view(event_id='e3')],
+            on_company_missing=lambda ids: None,
+        )
+
+        [error] = result.errors
+        assert error.index == 2
+        assert len(mocked_responses.calls) == 2  # reenvia uma vez só
+
+    def test_without_the_callback_errors_come_back_untouched(self, admin_client, mocked_responses):
+        mocked_responses.add(responses.POST, USAGE_URL, status=201, json={
+            'accepted': 0, 'duplicates': 0,
+            'errors': [{'index': 0, 'event_id': 'e1', 'error': NOT_FOUND}],
+        })
+
+        result = admin_client.engagement.track_batch([page_view(event_id='e1')])
+
+        assert result.errors[0].is_company_not_found
+        assert len(mocked_responses.calls) == 1
+
+    def test_other_errors_are_not_resent(self, admin_client, mocked_responses):
+        mocked_responses.add(responses.POST, USAGE_URL, status=201, json={
+            'accepted': 0, 'duplicates': 0,
+            'errors': [{'index': 0, 'event_id': 'e1', 'error': 'feature inválida'}],
+        })
+        called = []
+
+        result = admin_client.engagement.track_batch(
+            [page_view(event_id='e1')], on_company_missing=called.append,
+        )
+
+        assert called == []
+        assert len(result.errors) == 1
+        assert len(mocked_responses.calls) == 1
+
+    def test_callback_error_reaches_the_caller(self, admin_client, mocked_responses):
+        mocked_responses.add(responses.POST, USAGE_URL, status=201, json={
+            'accepted': 0, 'duplicates': 0,
+            'errors': [{'index': 0, 'event_id': 'e1', 'error': NOT_FOUND}],
+        })
+
+        def crm_down(ids):
+            raise RuntimeError('CRM fora do ar')
+
+        with pytest.raises(RuntimeError):
+            admin_client.engagement.track_batch([page_view(event_id='e1')], on_company_missing=crm_down)
+        assert len(mocked_responses.calls) == 1

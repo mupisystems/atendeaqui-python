@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 from .models import UsageResult
 
@@ -101,13 +101,25 @@ class EngagementModule:
                 event[key] = value
         return self.track_batch([event])
 
-    def track_batch(self, events: list[dict]) -> UsageResult:
+    def track_batch(
+        self,
+        events: list[dict],
+        on_company_missing: Callable[[set[str]], object] | None = None,
+    ) -> UsageResult:
         """
         Envia de 1 a 500 eventos num lote.
 
         Cada evento é gravado individualmente: os que tiverem problema voltam
         em `UsageResult.errors` (resposta 201), sem derrubar o lote. Reenviar
         com os mesmos `event_id` conta como `duplicates`, não como erro.
+
+        Args:
+            events: Os eventos, nos campos de track().
+            on_company_missing: Função chamada com os company_platform_id que
+                ainda não existem no CRM. Ela deve cadastrá-los
+                (client.crm.upsert_company); depois o SDK reenvia, uma vez
+                só, os eventos dessas empresas, com o mesmo event_id. Sem
+                ela, esses eventos voltam em `errors`.
 
         Raises:
             ValueError: lista vazia ou com mais de 500 eventos.
@@ -118,6 +130,32 @@ class EngagementModule:
         if len(events) > MAX_BATCH_SIZE:
             raise ValueError(f'Envie no máximo {MAX_BATCH_SIZE} eventos por lote.')
 
-        payload = {'events': [_prepare_event(event) for event in events]}
-        data = self._http.post('engagement/usage/', json=payload)
+        # Preparados uma vez só: o reenvio usa estes mesmos, com o mesmo event_id
+        prepared = [_prepare_event(event) for event in events]
+        result = self._send(prepared)
+
+        missing = [
+            error for error in result.errors
+            if error.is_company_not_found and 0 <= error.index < len(prepared)
+        ]
+        if not on_company_missing or not missing:
+            return result
+
+        indexes = [error.index for error in missing]
+        on_company_missing({prepared[i]['company_platform_id'] for i in indexes})
+        retry = self._send([prepared[i] for i in indexes])
+
+        # O AtendeAqui conta o index dentro do lote que recebeu. O reenvio é um
+        # lote menor: o index volta para a posição na lista original
+        for error in retry.errors:
+            if 0 <= error.index < len(indexes):
+                error.index = indexes[error.index]
+        return UsageResult(
+            accepted=result.accepted + retry.accepted,
+            duplicates=result.duplicates + retry.duplicates,
+            errors=[error for error in result.errors if error not in missing] + retry.errors,
+        )
+
+    def _send(self, prepared: list[dict]) -> UsageResult:
+        data = self._http.post('engagement/usage/', json={'events': prepared})
         return UsageResult.from_dict(data)
