@@ -6,6 +6,9 @@ SDK Python unificado para a plataforma AtendeAqui.
 
 ```bash
 pip install atendeaqui
+
+# Com a integração Django (telas acessadas e logins)
+pip install "atendeaqui[django]"
 ```
 
 ## Quick Start
@@ -687,6 +690,66 @@ progresso traz `email_unsubscribed=True`.
 
 Use valores fixos em minúsculas nos metadados e no `step_data` (ex.: `"saude"`, não `"Saúde"`/`"saude "`).
 
+## Integrar uma aplicação Django
+
+Registra no Atende Aqui o login e as telas acessadas pelos usuários de uma aplicação Django.
+O SDK reconhece o que é uma tela; a aplicação informa só as regras dela.
+
+**1. Instale com o extra:** `pip install "atendeaqui[django]"`.
+
+**2. Crie o tracker da aplicação** (ex.: `app/engagement.py`):
+
+```python
+from atendeaqui.contrib.django import EngagementTracker
+
+
+class AppTracker(EngagementTracker):
+    # Nome exibido de cada tela, pela chave namespace:url_name
+    screen_names = {"employers:job_list": "Processos"}
+    # Para acrescentar aos padrões, some aos da classe base
+    ignored_prefixes = EngagementTracker.ignored_prefixes + ("/api/",)
+    # Rotas chamadas automaticamente pela página (polling)
+    ignored_features = frozenset({"employers:score"})
+
+    def identify(self, user):
+        """(company_platform_id, user_id) de quem é contabilizado, ou None."""
+        if not user.selected_organization_id:
+            return None
+        return user.selected_organization_id, user.pk
+
+    def is_active(self):
+        """Opcional: False desliga o registro."""
+        return True
+
+    def send(self, events):
+        """Para onde vai cada lote, ex.: uma task Celery que chama track_batch."""
+        enviar_uso.delay(events)
+
+
+tracker = AppTracker()
+```
+
+**3. Configure o settings:**
+
+```python
+INSTALLED_APPS += ["atendeaqui.contrib.django"]       # registra o login
+MIDDLEWARE += ["atendeaqui.contrib.django.middleware.EngagementMiddleware"]  # depois do AuthenticationMiddleware
+ATENDEAQUI_ENGAGEMENT_TRACKER = "app.engagement.tracker"
+```
+
+O que conta como tela:
+
+- GET com resposta HTML e status 200. POST de formulário, redirect, JSON e páginas de erro ficam de fora.
+- Em requisições HTMX (`HX-Request: true`), qualquer resposta abaixo de 400 conta na página de origem
+  (`HX-Current-URL`, aceito só se for do mesmo host): clicar numa aba conta na tela atual.
+- Ficam de fora `ignored_prefixes` (padrão: `/static/`, `/media/`, `/__debug__/`),
+  `ignored_namespaces` (padrão: `admin`, `djdt`), `ignored_features` e rotas sem `name`.
+
+Cada evento leva `feature` (`namespace:url_name`), `feature_name` (de `screen_names`, ou gerado a partir do
+`url_name`, com um aviso no log) e `feature_path` (o padrão da rota sem ids, ex.: `/vagas/<job_id>/`).
+Os eventos vão para um `UsageBuffer` do tracker; erros no registro vão para o log e nunca afetam a página
+nem o login. Nos testes, `AppTracker(background=False)` não liga a thread.
+
 ## Tratamento de Erros
 
 ```python
@@ -752,6 +815,11 @@ atendeaqui/
 ├── client.py            # Cliente principal
 ├── _http.py             # Transport HTTP compartilhado
 ├── exceptions.py        # Exceções compartilhadas
+├── contrib/
+│   └── django/          # Integração Django (extra [django])
+│       ├── tracker.py   # EngagementTracker, get_tracker
+│       ├── middleware.py # EngagementMiddleware
+│       └── apps.py      # Registro de login
 ├── clients/             # Módulo de Clientes
 │   ├── __init__.py      # ClientsModule
 │   └── models.py        # Client, TeamMember
@@ -773,6 +841,7 @@ Novos módulos (tickets, knowledge_base, etc.) seguirão o mesmo padrão.
 
 - Python 3.10+
 - requests >= 2.28
+- Django >= 4.2, só para a integração Django
 
 ## Licença
 
