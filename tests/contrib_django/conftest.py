@@ -13,6 +13,7 @@ if not settings.configured:
         INSTALLED_APPS=[
             'django.contrib.contenttypes',
             'django.contrib.auth',
+            'atendeaqui.contrib.django',
         ],
         ATENDEAQUI_ENGAGEMENT_TRACKER='tests.contrib_django.trackers.tracker',
         USE_TZ=True,
