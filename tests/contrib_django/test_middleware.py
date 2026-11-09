@@ -80,3 +80,41 @@ class TestConfiguration:
             with pytest.raises(ImproperlyConfigured):
                 get_tracker()
 
+
+class TestActivity:
+    """track_activity: a atividade sai com o usuário da requisição em andamento."""
+
+    def test_activity_inside_the_request_uses_its_user(self, tracker):
+        request = RequestFactory().post('/vagas/')
+        request.user = person(full_name='Ana Souza', email='ana@casulo.com.br')
+
+        def view(req):
+            # Como o save de um model: o código não tem o usuário em mãos
+            tracker.track_activity('vaga_criada', 'Vaga criada')
+            return HttpResponse('ok')
+
+        EngagementMiddleware(view)(request)
+
+        [event] = [event for event in tracker.written() if event['type'] == 'activity']
+        assert event['activity'] == 'vaga_criada'
+        assert event['activity_name'] == 'Vaga criada'
+        assert event['client_id'] == '1842'
+        assert event['user_id'] == '77'
+        assert event['user_name'] == 'Ana Souza'
+
+    def test_outside_a_request_without_user_nothing_is_recorded(self, tracker):
+        assert tracker.track_activity('vaga_criada', 'Vaga criada') is None
+        assert tracker.written() == []
+
+    def test_explicit_user_works_outside_a_request(self, tracker):
+        event = tracker.track_activity('vaga_criada', 'Vaga criada', user=person())
+
+        assert event['type'] == 'activity'
+
+    def test_user_the_app_does_not_count_records_nothing(self, tracker):
+        assert tracker.track_activity('vaga_criada', 'Vaga criada', user=person(company_id=None)) is None
+
+    def test_the_request_is_forgotten_after_the_response(self, tracker):
+        visit('/vagas/')
+
+        assert tracker.track_activity('vaga_criada', 'Vaga criada') is None

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import re
+from contextvars import ContextVar
 from urllib.parse import urlparse
 
 from django.conf import settings
@@ -20,6 +21,18 @@ from django.utils.module_loading import import_string
 from ...engagement.buffer import UsageBuffer
 
 logger = logging.getLogger(__name__)
+
+# Requisição em andamento, guardada pelo EngagementMiddleware: é dela que
+# track_activity tira quem fez a atividade quando o código (ex.: o save de um
+# model) não tem o usuário em mãos.
+_current_request: ContextVar = ContextVar('atendeaqui_current_request', default=None)
+
+
+def current_user():
+    """Usuário autenticado da requisição em andamento, ou None (fora de requisição ou anônimo)."""
+    request = _current_request.get()
+    user = getattr(request, 'user', None)
+    return user if user is not None and user.is_authenticated else None
 
 
 def get_tracker() -> EngagementTracker:
@@ -111,6 +124,25 @@ class EngagementTracker:
         if not ids or not self.is_active():
             return None
         return self.buffer.add(type='login', **self.identity_fields(ids))
+
+    def track_activity(self, activity: str, activity_name: str, user=None) -> dict | None:
+        """
+        Anota uma atividade (algo de valor que a pessoa fez, ex.: vaga criada).
+
+        Sem `user`, usa o usuário da requisição em andamento (o middleware
+        guarda a requisição), o que permite chamar de onde o usuário não
+        chega, como o save de um model. Fora de requisição e sem `user`, não
+        anota nada. `activity` é a chave estável (`^[a-z0-9_.:-]+$`) e
+        `activity_name`, o nome exibido.
+        """
+        user = user or current_user()
+        if user is None:
+            return None
+        ids = self.identify(user)
+        if not ids or not self.is_active():
+            return None
+        return self.buffer.add(
+            type='activity', **self.identity_fields(ids), activity=activity, activity_name=activity_name)
 
     # Regras genéricas ----------------------------------------------------
 
