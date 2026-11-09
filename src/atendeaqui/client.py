@@ -46,6 +46,9 @@ class AtendeAquiClient:
         sandbox: Se True, usa o ambiente de homologação
                  (api.homolog.atendeaqui.com.br/v1). Padrão: False (produção).
         timeout: Timeout em segundos para requisições HTTP. Padrão: 30.
+        platform: Nome fixo da plataforma que usa o SDK (ex.: "etalentos"),
+                  enviado no header X-AtendeAqui-Platform. Obrigatório para os
+                  eventos de uso: a chave fica presa à primeira plataforma.
 
     Pelo menos um de ``api_token`` ou ``flow_key`` deve ser fornecido.
     """
@@ -56,6 +59,7 @@ class AtendeAquiClient:
         flow_key: str | None = None,
         sandbox: bool = False,
         timeout: int = 30,
+        platform: str | None = None,
         *,
         _base_url: str | None = None,
     ):
@@ -68,6 +72,9 @@ class AtendeAquiClient:
         headers: dict = {}
         if api_token:
             headers['Authorization'] = f'Bearer {api_token}'
+        # O AtendeAqui só lê o header nos eventos de uso; o resto da API o ignora
+        if platform:
+            headers['X-AtendeAqui-Platform'] = platform
 
         self._http = HttpClient(
             base_url=_base_url or (SANDBOX_URL if sandbox else PRODUCTION_URL),

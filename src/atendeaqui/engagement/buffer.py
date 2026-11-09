@@ -5,7 +5,7 @@ Bloquinho de eventos de uso: anota agora e envia em lote depois, fora da requisi
 
     client = AtendeAquiClient(api_token="...")
     buffer = UsageBuffer(send=client.engagement.track_batch)
-    buffer.add(type="login", company_platform_id="1842", user_id="77")
+    buffer.add(type="login", client_id="3f2b...", user_id="77")
 
 Cada processo tem o seu bloquinho. Uma thread ajudante esvazia o bloquinho a
 cada `interval` segundos, ou antes, quando ele junta `batch_size` eventos.

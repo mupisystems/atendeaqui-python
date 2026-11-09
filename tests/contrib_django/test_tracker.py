@@ -32,7 +32,7 @@ class TestPageView:
         event = visit(tracker, '/vagas/')
 
         assert event['type'] == 'page_view'
-        assert event['company_platform_id'] == '1842'
+        assert event['client_id'] == '1842'
         assert event['user_id'] == '77'
         assert event['feature'] == 'employers:job_list'
         assert event['feature_name'] == 'Processos'
@@ -124,12 +124,23 @@ class TestLogin:
         event = tracker.track_login(person())
 
         assert event['type'] == 'login'
-        assert event['company_platform_id'] == '1842'
+        assert event['client_id'] == '1842'
         assert event['user_id'] == '77'
         assert 'feature' not in event
 
     def test_user_the_app_does_not_count_is_ignored(self, tracker):
         assert tracker.track_login(person(company_id=None)) is None
+
+    def test_name_and_email_from_identify_go_in_the_event(self, tracker):
+        event = tracker.track_login(person(full_name='Ana Souza', email='ana@casulo.com.br'))
+
+        assert (event['user_name'], event['user_email']) == ('Ana Souza', 'ana@casulo.com.br')
+
+    def test_missing_name_or_email_are_left_out(self, tracker):
+        event = tracker.track_login(person(full_name='', email=None))
+
+        assert 'user_name' not in event
+        assert 'user_email' not in event
 
     def test_inactive_records_nothing(self, tracker):
         tracker.active = False

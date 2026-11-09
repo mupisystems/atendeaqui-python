@@ -5,10 +5,10 @@ Acessado via client.engagement:
 
     from atendeaqui import AtendeAquiClient
 
-    client = AtendeAquiClient(api_token="...")
-    client.engagement.track(type="login", company_platform_id="1842", user_id="77")
+    client = AtendeAquiClient(api_token="...", platform="etalentos")
+    client.engagement.track(type="login", client_id="3f2b...", user_id="77", user_name="Ana Souza")
     client.engagement.track_batch([
-        {"type": "page_view", "company_platform_id": "1842", "user_id": "77",
+        {"type": "page_view", "client_id": "3f2b...", "user_id": "77",
          "feature": "employers:job_list", "feature_name": "Processos seletivos"},
     ])
 
@@ -36,7 +36,7 @@ def _prepare_event(event: dict) -> dict:
 
     - `event_id` e `occurred_at` só são gerados quando não vieram.
     - `occurred_at` em datetime vira ISO 8601 com fuso.
-    - `company_platform_id` e `user_id` vão como texto.
+    - `client_id` e `user_id` vão como texto.
     - Não altera o dict recebido.
     """
 
@@ -55,7 +55,7 @@ def _prepare_event(event: dict) -> dict:
         prepared['occurred_at'] = occurred_at.isoformat()
 
     # 4) IDs sempre como texto
-    prepared['company_platform_id'] = str(prepared['company_platform_id'])
+    prepared['client_id'] = str(prepared['client_id'])
     prepared['user_id'] = str(prepared['user_id'])
 
     return prepared
@@ -65,8 +65,9 @@ class EngagementModule:
     """
     Módulo de Engajamento de Uso — acesso via client.engagement.
 
-    Requer api_token (Bearer token). A empresa precisa existir no CRM
-    (client.crm.upsert_company) antes dos eventos dela.
+    Requer api_token (chave de conta de serviço) e platform no cliente. O
+    cliente (client_id) precisa existir no AtendeAqui antes dos eventos dele
+    (client.clients.create).
     """
 
     def __init__(self, http: HttpClient):
@@ -75,28 +76,36 @@ class EngagementModule:
     def track(
         self,
         type: str,
-        company_platform_id: str,
+        client_id: str,
         user_id: str,
         feature: str | None = None,
         feature_name: str | None = None,
         event_id: str | None = None,
         occurred_at: datetime | str | None = None,
+        user_name: str | None = None,
+        user_email: str | None = None,
+        activity: str | None = None,
+        activity_name: str | None = None,
     ) -> UsageResult:
         """
         Envia um único evento (atalho para um lote de 1).
 
         Args:
-            type: "login" ou "page_view".
-            company_platform_id: platform_id da empresa no CRM.
-            user_id: ID do usuário na plataforma.
+            type: "login", "page_view" ou "activity".
+            client_id: client_id do cliente no AtendeAqui.
+            user_id: ID da pessoa na plataforma.
             feature: Chave estável da tela (só no page_view), ex.: "employers:job_list".
             feature_name: Nome exibido da tela (só no page_view).
             event_id: UUID do evento. Gerado se omitido.
             occurred_at: Quando aconteceu. Agora (UTC) se omitido.
+            user_name, user_email: Nome e e-mail da pessoa, mostrados nas telas.
+            activity, activity_name: Chave e nome da atividade (só na "activity").
         """
-        event = {'type': type, 'company_platform_id': company_platform_id, 'user_id': user_id}
+        event = {'type': type, 'client_id': client_id, 'user_id': user_id}
         for key, value in (('feature', feature), ('feature_name', feature_name),
-                           ('event_id', event_id), ('occurred_at', occurred_at)):
+                           ('event_id', event_id), ('occurred_at', occurred_at),
+                           ('user_name', user_name), ('user_email', user_email),
+                           ('activity', activity), ('activity_name', activity_name)):
             if value is not None:
                 event[key] = value
         return self.track_batch([event])
@@ -104,7 +113,7 @@ class EngagementModule:
     def track_batch(
         self,
         events: list[dict],
-        on_company_missing: Callable[[set[str]], object] | None = None,
+        on_client_missing: Callable[[set[str]], object] | None = None,
     ) -> UsageResult:
         """
         Envia de 1 a 500 eventos num lote.
@@ -115,11 +124,11 @@ class EngagementModule:
 
         Args:
             events: Os eventos, nos campos de track().
-            on_company_missing: Função chamada com os company_platform_id que
-                ainda não existem no CRM. Ela deve cadastrá-los
-                (client.crm.upsert_company); depois o SDK reenvia, uma vez
-                só, os eventos dessas empresas, com o mesmo event_id. Sem
-                ela, esses eventos voltam em `errors`.
+            on_client_missing: Função chamada com os client_id que ainda não
+                existem no AtendeAqui (code CLIENT_NOT_FOUND). Ela deve
+                cadastrá-los (client.clients.create); depois o SDK reenvia,
+                uma vez só, os eventos desses clientes, com o mesmo event_id.
+                Sem ela, esses eventos voltam em `errors`.
 
         Raises:
             ValueError: lista vazia ou com mais de 500 eventos.
@@ -136,13 +145,13 @@ class EngagementModule:
 
         missing = [
             error for error in result.errors
-            if error.is_company_not_found and 0 <= error.index < len(prepared)
+            if error.is_client_not_found and 0 <= error.index < len(prepared)
         ]
-        if not on_company_missing or not missing:
+        if not on_client_missing or not missing:
             return result
 
         indexes = [error.index for error in missing]
-        on_company_missing({prepared[i]['company_platform_id'] for i in indexes})
+        on_client_missing({prepared[i]['client_id'] for i in indexes})
         retry = self._send([prepared[i] for i in indexes])
 
         # O AtendeAqui conta o index dentro do lote que recebeu. O reenvio é um

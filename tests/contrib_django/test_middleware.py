@@ -79,3 +79,4 @@ class TestConfiguration:
         with override_settings(ATENDEAQUI_ENGAGEMENT_TRACKER=None):
             with pytest.raises(ImproperlyConfigured):
                 get_tracker()
+

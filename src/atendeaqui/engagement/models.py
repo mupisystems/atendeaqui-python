@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-COMPANY_NOT_FOUND = 'empresa não encontrada'
+CLIENT_NOT_FOUND = 'CLIENT_NOT_FOUND'
 
 
 @dataclass
@@ -14,15 +14,17 @@ class UsageError:
     index: int
     event_id: str | None
     error: str
+    code: str = ''
 
     @property
-    def is_company_not_found(self) -> bool:
-        """True quando a empresa ainda não existe no CRM.
+    def is_client_not_found(self) -> bool:
+        """True quando o cliente (client_id) ainda não existe no AtendeAqui.
 
-        Único erro que se resolve reenviando: cadastre a empresa
-        (client.crm.upsert_company) e reenvie o evento com o MESMO event_id.
+        Único erro que se resolve reenviando: cadastre o cliente
+        (client.clients.create) e reenvie o evento com o MESMO event_id.
+        Decide pelo `code`, nunca pelo texto do erro.
         """
-        return self.error == COMPANY_NOT_FOUND
+        return self.code == CLIENT_NOT_FOUND
 
     @classmethod
     def from_dict(cls, data: dict) -> UsageError:
@@ -30,6 +32,7 @@ class UsageError:
             index=data.get('index', -1),
             event_id=data.get('event_id'),
             error=data.get('error', ''),
+            code=data.get('code', ''),
         )
 
 

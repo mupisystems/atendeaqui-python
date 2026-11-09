@@ -38,8 +38,9 @@ class EngagementTracker:
     Identifica telas acessadas e logins e os anota num UsageBuffer.
 
     A aplicação implementa:
-        identify(user): (company_platform_id, user_id) de quem é contabilizado,
-            ou None.
+        identify(user): (client_id, user_id) ou (client_id, user_id, nome,
+            e-mail) de quem é contabilizado, ou None. Nome e e-mail são o que
+            o Atende Aqui mostra da pessoa: mande sempre que tiver.
         send(events): para onde vai cada lote (ex.: uma task Celery que chama
             client.engagement.track_batch).
         is_active(): opcional; False desliga o registro (padrão: True).
@@ -95,12 +96,10 @@ class EngagementTracker:
         match = self.screen_match(request)
         if not match or len(match.view_name) > self.max_feature_length:
             return None
-        company_platform_id, user_id = ids
         feature = match.view_name
         return self.buffer.add(
             type='page_view',
-            company_platform_id=company_platform_id,
-            user_id=user_id,
+            **self.identity_fields(ids),
             feature=feature,
             feature_name=self.screen_name(feature),
             feature_path=self.screen_path(match),
@@ -111,10 +110,19 @@ class EngagementTracker:
         ids = self.identify(user)
         if not ids or not self.is_active():
             return None
-        company_platform_id, user_id = ids
-        return self.buffer.add(type='login', company_platform_id=company_platform_id, user_id=user_id)
+        return self.buffer.add(type='login', **self.identity_fields(ids))
 
     # Regras genéricas ----------------------------------------------------
+
+    @staticmethod
+    def identity_fields(ids) -> dict:
+        """Campos do evento a partir do identify: client_id, user_id e, se vierem, nome e e-mail."""
+        client_id, user_id, *identity = ids
+        fields = {'client_id': client_id, 'user_id': user_id}
+        for key, value in zip(('user_name', 'user_email'), identity):
+            if value:
+                fields[key] = value
+        return fields
 
     def identify_request(self, request) -> tuple | None:
         user = getattr(request, 'user', None)

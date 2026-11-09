@@ -151,6 +151,21 @@ class TestClientInit:
         assert responses.calls[0].request.headers['Authorization'] == 'Bearer my-token'
 
     @responses.activate
+    def test_platform_sends_its_header(self):
+        responses.add(responses.POST, f'{BASE_URL}/api/engagement/usage/',
+                      json={'accepted': 1, 'duplicates': 0, 'errors': []}, status=201)
+
+        client = AtendeAquiClient(api_token='aa_sk_x', platform='etalentos', _base_url=f'{BASE_URL}/api')
+        client.engagement.track(type='login', client_id='3f2b', user_id='77')
+
+        assert responses.calls[0].request.headers['X-AtendeAqui-Platform'] == 'etalentos'
+
+    def test_without_platform_there_is_no_header(self):
+        client = AtendeAquiClient(api_token='aa_sk_x', _base_url=f'{BASE_URL}/api')
+
+        assert 'X-AtendeAqui-Platform' not in client._http._session.headers
+
+    @responses.activate
     def test_both_headers_sent(self):
         responses.add(
             responses.GET,

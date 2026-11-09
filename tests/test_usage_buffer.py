@@ -11,7 +11,7 @@ EVENT_ID = '7c9e6679-7425-40de-944b-e07fc1f90ae7'
 
 
 def login(user_id='77', **extra):
-    return {'type': 'login', 'company_platform_id': '1842', 'user_id': user_id, **extra}
+    return {'type': 'login', 'client_id': '1842', 'user_id': user_id, **extra}
 
 
 class Recorder:
@@ -48,13 +48,13 @@ class TestAdd:
         buffer = UsageBuffer(send=Recorder(), background=False)
 
         event = buffer.add(
-            type='login', company_platform_id=1842, user_id=77,
+            type='login', client_id=1842, user_id=77,
             occurred_at=datetime(2026, 10, 30, 12, 0, tzinfo=timezone.utc),
         )
 
         assert json.loads(json.dumps(event)) == event
         assert event['occurred_at'] == '2026-10-30T12:00:00+00:00'
-        assert event['company_platform_id'] == '1842'
+        assert event['client_id'] == '1842'
 
     def test_full_buffer_drops_the_oldest(self):
         send = Recorder()

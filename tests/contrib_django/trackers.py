@@ -15,7 +15,9 @@ class FakeTracker(EngagementTracker):
 
     def identify(self, user):
         company_id = getattr(user, 'company_id', None)
-        return (company_id, user.pk) if company_id else None
+        if not company_id:
+            return None
+        return company_id, user.pk, getattr(user, 'full_name', None), getattr(user, 'email', None)
 
     def is_active(self):
         return self.active
