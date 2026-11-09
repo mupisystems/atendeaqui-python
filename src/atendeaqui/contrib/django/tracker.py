@@ -8,7 +8,6 @@ settings.ATENDEAQUI_ENGAGEMENT_TRACKER.
 from __future__ import annotations
 
 import logging
-import re
 from contextvars import ContextVar
 from urllib.parse import urlparse
 
@@ -115,7 +114,6 @@ class EngagementTracker:
             **self.identity_fields(ids),
             feature=feature,
             feature_name=self.screen_name(feature),
-            feature_path=self.screen_path(match),
         )
 
     def track_login(self, user) -> dict | None:
@@ -215,15 +213,6 @@ class EngagementTracker:
         ):
             return None
         return urlparse(current).path
-
-    def screen_path(self, match) -> str:
-        """
-        Caminho da tela sem os ids: '/vagas/<job_id>/remuneracao/'.
-
-        Vem do padrão da rota, e não do endereço acessado: é o mesmo em todo
-        acesso e não expõe o id da vaga ou do candidato.
-        """
-        return '/' + re.sub(r'<\w+:(\w+)>', r'<\1>', match.route)
 
     def screen_name(self, feature: str) -> str:
         """

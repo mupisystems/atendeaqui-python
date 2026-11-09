@@ -36,13 +36,14 @@ class TestPageView:
         assert event['user_id'] == '77'
         assert event['feature'] == 'employers:job_list'
         assert event['feature_name'] == 'Processos'
-        assert event['feature_path'] == '/vagas/'
         assert tracker.written() == [event]
 
-    def test_path_hides_the_ids(self, tracker):
+    def test_event_has_only_contract_fields(self, tracker):
+        # O Atende Aqui descarta campos fora do contrato (ex.: o caminho da rota)
         event = visit(tracker, '/vagas/123/remuneracao/')
 
-        assert event['feature_path'] == '/vagas/<job_id>/remuneracao/'
+        assert set(event) == {
+            'type', 'client_id', 'user_id', 'feature', 'feature_name', 'event_id', 'occurred_at'}
 
     def test_screen_without_name_uses_the_generated_name(self, tracker):
         assert visit(tracker, '/')['feature_name'] == 'Dashboard'
@@ -104,7 +105,6 @@ class TestHtmx:
         event = self.htmx(tracker, '/sem-nome/', 'http://testserver/vagas/123/remuneracao/')
 
         assert event['feature'] == 'employers:job_salary'
-        assert event['feature_path'] == '/vagas/<job_id>/remuneracao/'
 
     def test_current_url_from_another_site_is_ignored(self, tracker):
         assert self.htmx(tracker, '/sem-nome/', 'http://outro-site.com/vagas/') is None
