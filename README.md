@@ -157,24 +157,34 @@ admin.crm.upsert_company(platform_id="1842", name="Construtora Alfa Ltda")
 admin.crm.upsert_company(platform_id="1842", name="Construtora Alfa", status="churned", mrr=None)
 ```
 
-### Engajamento de uso (requer api_token)
+### Engajamento de uso (requer api_token e platform)
 
-Eventos de `login` e `page_view` por empresa e usuário. Sessões, tempo por tela e frequência
-são calculados no AtendeAqui. A empresa precisa existir no CRM antes dos eventos dela.
+Eventos de `login`, `page_view` e `activity` de cada cliente do AtendeAqui (pelo `client_id`)
+numa plataforma, com a pessoa que agiu. Sessões, tempo por tela e frequência são calculados no
+AtendeAqui. O cliente precisa existir no AtendeAqui antes dos eventos dele.
+
+A plataforma vai no cliente do SDK: `platform` é um nome fixo, em minúsculas, que o SDK manda no
+header `X-AtendeAqui-Platform`. A chave de conta de serviço fica presa à primeira plataforma que a
+usar: use uma chave para cada plataforma.
 
 ```python
 import uuid
 from datetime import datetime, timezone
 
+admin = AtendeAquiClient(api_token="aa_sk_...", platform="etalentos")
+
 # Um evento (event_id e occurred_at são gerados se omitidos)
-admin.engagement.track(type="login", company_platform_id="1842", user_id="77")
+admin.engagement.track(type="login", client_id="3f2b...", user_id="77",
+                       user_name="Ana Souza", user_email="ana@casulo.com.br")
 
 # Lote de 1 a 500 eventos
 result = admin.engagement.track_batch([
     {
         "type": "page_view",
-        "company_platform_id": "1842",
-        "user_id": "77",
+        "client_id": "3f2b...",                   # client_id do cliente no AtendeAqui
+        "user_id": "77",                           # a pessoa, na plataforma
+        "user_name": "Ana Souza",                  # nome e e-mail: o que as telas mostram
+        "user_email": "ana@casulo.com.br",
         "feature": "employers:job_list",          # chave estável da tela (^[a-z0-9_.:-]+$)
         "feature_name": "Processos seletivos",    # nome exibido; pode mudar
         # Numa fila, gere estes dois ao enfileirar e reenvie sempre os mesmos
@@ -182,33 +192,40 @@ result = admin.engagement.track_batch([
         "event_id": str(uuid.uuid4()),
         "occurred_at": datetime.now(timezone.utc),
     },
+    {
+        "type": "activity",                        # algo de valor que a pessoa fez
+        "client_id": "3f2b...", "user_id": "77",
+        "activity": "vaga_criada",                 # chave estável: vira o tipo de evento
+        "activity_name": "Vaga criada",            # nome exibido (até 200)
+    },
 ])
 
 result.accepted     # novos gravados
 result.duplicates   # event_id já recebido (reenvio): não é erro
 for error in result.errors:
-    if error.is_company_not_found:
-        ...  # admin.crm.upsert_company(...) e reenvie com o MESMO event_id
-    else:
+    if error.is_client_not_found:              # code CLIENT_NOT_FOUND
+        ...  # admin.clients.get_or_create(...) e reenvie com o MESMO event_id
+    else:                                      # code INVALID_EVENT
         ...  # não se resolve sozinho: registre e descarte
 
-# Ou deixe o SDK cadastrar e reenviar: a função recebe os company_platform_id que
-# faltam no CRM; depois o SDK reenvia esses eventos uma vez, com o mesmo event_id
-def cadastrar_empresas(platform_ids):
-    for platform_id in platform_ids:
-        empresa = minhas_empresas[platform_id]
-        admin.crm.upsert_company(platform_id=platform_id, name=empresa.nome)
+# Ou deixe o SDK cadastrar e reenviar: a função recebe os client_id que faltam no
+# AtendeAqui; depois o SDK reenvia esses eventos uma vez, com o mesmo event_id
+def cadastrar_clientes(client_ids):
+    for client_id in client_ids:
+        empresa = minhas_empresas[client_id]
+        admin.clients.get_or_create(client_id, full_name=empresa.nome, email=empresa.email)
 
-result = admin.engagement.track_batch(eventos, on_company_missing=cadastrar_empresas)
+result = admin.engagement.track_batch(eventos, on_client_missing=cadastrar_clientes)
 ```
 
 | Resultado | O que fazer |
 |---|---|
 | `accepted` / `duplicates` | Remova o evento da fila |
-| `error.is_company_not_found` | Cadastre a empresa e reenvie com o mesmo `event_id` (ou passe `on_company_missing`) |
-| Outros `errors` | Registre e descarte |
+| `error.is_client_not_found` | Cadastre o cliente e reenvie com o mesmo `event_id` (ou passe `on_client_missing`) |
+| Outros `errors` (`INVALID_EVENT`) | Registre e descarte |
 | `ServerError`, `RateLimitError`, timeout | Reenvie o lote inteiro, com os mesmos `event_id` |
-| `AuthenticationError` | Token inválido: pare e alerte |
+| `AuthenticationError` | Chave inválida ou de outra plataforma (`e.code == "PLATFORM_MISMATCH"`): pare e alerte |
+| `ValidationError` com `PLATFORM_REQUIRED`/`PLATFORM_INVALID`/`PLATFORM_CONFLICT` | Configuração da plataforma: pare e alerte |
 
 #### Enviar em lote, fora da requisição: `UsageBuffer`
 
@@ -224,7 +241,7 @@ buffer = UsageBuffer(send=admin.engagement.track_batch)
 # Ou por uma fila (ex.: Celery): a task recebe o lote e chama track_batch
 buffer = UsageBuffer(send=lambda events: enviar_uso.delay(events))
 
-buffer.add(type="login", company_platform_id="1842", user_id="77")
+buffer.add(type="login", client_id="3f2b...", user_id="77", user_name="Ana Souza")
 ```
 
 - `add()` gera o `event_id` e o `occurred_at` na hora da anotação: reenviar o lote não conta duas vezes.
@@ -692,8 +709,8 @@ Use valores fixos em minúsculas nos metadados e no `step_data` (ex.: `"saude"`,
 
 ## Integrar uma aplicação Django
 
-Registra no Atende Aqui o login e as telas acessadas pelos usuários de uma aplicação Django.
-O SDK reconhece o que é uma tela; a aplicação informa só as regras dela.
+Registra no Atende Aqui o login, as telas acessadas e as atividades dos usuários de uma aplicação
+Django. O SDK reconhece o que é uma tela; a aplicação informa só as regras dela.
 
 **1. Instale com o extra:** `pip install "atendeaqui[django]"`.
 
@@ -712,10 +729,15 @@ class AppTracker(EngagementTracker):
     ignored_features = frozenset({"employers:score"})
 
     def identify(self, user):
-        """(company_platform_id, user_id) de quem é contabilizado, ou None."""
-        if not user.selected_organization_id:
+        """(client_id, user_id, nome, e-mail) de quem é contabilizado, ou None.
+
+        client_id é o do cliente no AtendeAqui (ex.: o UUID da organização);
+        nome e e-mail são opcionais, mas é o que o AtendeAqui mostra da pessoa.
+        """
+        org = user.selected_organization
+        if not org:
             return None
-        return user.selected_organization_id, user.pk
+        return str(org.secret_key), user.pk, user.get_full_name(), user.email
 
     def is_active(self):
         """Opcional: False desliga o registro."""
@@ -750,6 +772,11 @@ Cada evento leva `feature` (`namespace:url_name`), `feature_name` (de `screen_na
 Os eventos vão para um `UsageBuffer` do tracker; erros no registro vão para o log e nunca afetam a página
 nem o login. Nos testes, `AppTracker(background=False)` não liga a thread.
 
+**Atividades:** chame `tracker.track_activity("vaga_criada", "Vaga criada")` no ponto do código em que ela
+acontece, mesmo onde o usuário não chega (ex.: o `save` de um model). Sem `user=`, o SDK usa o usuário da
+requisição em andamento, guardado pelo middleware; fora de requisição (task, shell) não anota nada. A
+chave não deve mudar: ela vira o tipo de evento no AtendeAqui.
+
 ## Tratamento de Erros
 
 ```python
@@ -777,7 +804,7 @@ except AtendeAquiError as e:
 
 ```
 AtendeAquiError
-├── AuthenticationError    # 401/403
+├── AuthenticationError    # 401/403 (inclui PLATFORM_MISMATCH e PLATFORM_INACTIVE)
 ├── NotFoundError          # 404
 ├── ValidationError        # 400
 │   ├── StepNotFoundError
