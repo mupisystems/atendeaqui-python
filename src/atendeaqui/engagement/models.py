@@ -21,7 +21,7 @@ class UsageError:
         """True quando o cliente (client_id) ainda não existe no AtendeAqui.
 
         Único erro que se resolve reenviando: cadastre o cliente
-        (client.clients.create) e reenvie o evento com o MESMO event_id.
+        (client.clients.get_or_create) e reenvie o evento com o MESMO event_id.
         Decide pelo `code`, nunca pelo texto do erro.
         """
         return self.code == CLIENT_NOT_FOUND

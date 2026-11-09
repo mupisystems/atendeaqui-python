@@ -163,9 +163,14 @@ Eventos de `login`, `page_view` e `activity` de cada cliente do AtendeAqui (pelo
 numa plataforma, com a pessoa que agiu. Sessões, tempo por tela e frequência são calculados no
 AtendeAqui. O cliente precisa existir no AtendeAqui antes dos eventos dele.
 
+A chave tem de ser de **conta de serviço** (`aa_sk_...`), com o escopo `engagement:write`: o token
+legado recebe `403 API_KEY_REQUIRED`. Crie no painel do AtendeAqui, em Configurações → Integrações →
+Contas de serviço, com os escopos que a plataforma usa (ex.: também `clients:write` para cadastrar
+os clientes).
+
 A plataforma vai no cliente do SDK: `platform` é um nome fixo, em minúsculas, que o SDK manda no
-header `X-AtendeAqui-Platform`. A chave de conta de serviço fica presa à primeira plataforma que a
-usar: use uma chave para cada plataforma.
+header `X-AtendeAqui-Platform`. A chave fica presa à primeira plataforma que a usar: use uma chave
+para cada plataforma.
 
 ```python
 import uuid
@@ -224,7 +229,7 @@ result = admin.engagement.track_batch(eventos, on_client_missing=cadastrar_clien
 | `error.is_client_not_found` | Cadastre o cliente e reenvie com o mesmo `event_id` (ou passe `on_client_missing`) |
 | Outros `errors` (`INVALID_EVENT`) | Registre e descarte |
 | `ServerError`, `RateLimitError`, timeout | Reenvie o lote inteiro, com os mesmos `event_id` |
-| `AuthenticationError` | Chave inválida ou de outra plataforma (`e.code == "PLATFORM_MISMATCH"`): pare e alerte |
+| `AuthenticationError` | Chave inválida, token legado (`e.code == "API_KEY_REQUIRED"`), chave de outra plataforma (`"PLATFORM_MISMATCH"`) ou plataforma desativada no AtendeAqui (`"PLATFORM_INACTIVE"`): pare e alerte |
 | `ValidationError` com `PLATFORM_REQUIRED`/`PLATFORM_INVALID`/`PLATFORM_CONFLICT` | Configuração da plataforma: pare e alerte |
 
 #### Enviar em lote, fora da requisição: `UsageBuffer`
@@ -767,8 +772,8 @@ O que conta como tela:
 - Ficam de fora `ignored_prefixes` (padrão: `/static/`, `/media/`, `/__debug__/`),
   `ignored_namespaces` (padrão: `admin`, `djdt`), `ignored_features` e rotas sem `name`.
 
-Cada evento leva `feature` (`namespace:url_name`), `feature_name` (de `screen_names`, ou gerado a partir do
-`url_name`, com um aviso no log) e `feature_path` (o padrão da rota sem ids, ex.: `/vagas/<job_id>/`).
+Cada evento leva `feature` (`namespace:url_name`, a chave estável da tela) e `feature_name` (de
+`screen_names`, ou gerado a partir do `url_name`, com um aviso no log).
 Os eventos vão para um `UsageBuffer` do tracker; erros no registro vão para o log e nunca afetam a página
 nem o login. Nos testes, `AppTracker(background=False)` não liga a thread.
 
@@ -804,7 +809,7 @@ except AtendeAquiError as e:
 
 ```
 AtendeAquiError
-├── AuthenticationError    # 401/403 (inclui PLATFORM_MISMATCH e PLATFORM_INACTIVE)
+├── AuthenticationError    # 401/403 (inclui API_KEY_REQUIRED, PLATFORM_MISMATCH e PLATFORM_INACTIVE)
 ├── NotFoundError          # 404
 ├── ValidationError        # 400
 │   ├── StepNotFoundError

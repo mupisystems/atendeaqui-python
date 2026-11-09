@@ -65,9 +65,10 @@ class EngagementModule:
     """
     Módulo de Engajamento de Uso — acesso via client.engagement.
 
-    Requer api_token (chave de conta de serviço) e platform no cliente. O
-    cliente (client_id) precisa existir no AtendeAqui antes dos eventos dele
-    (client.clients.create).
+    Requer api_token (chave de conta de serviço aa_sk_..., com o escopo
+    engagement:write) e platform no cliente. O cliente (client_id) precisa
+    existir no AtendeAqui antes dos eventos dele (client.clients.get_or_create:
+    o create duplicaria o cliente).
     """
 
     def __init__(self, http: HttpClient):
@@ -126,7 +127,7 @@ class EngagementModule:
             events: Os eventos, nos campos de track().
             on_client_missing: Função chamada com os client_id que ainda não
                 existem no AtendeAqui (code CLIENT_NOT_FOUND). Ela deve
-                cadastrá-los (client.clients.create); depois o SDK reenvia,
+                cadastrá-los (client.clients.get_or_create); depois o SDK reenvia,
                 uma vez só, os eventos desses clientes, com o mesmo event_id.
                 Sem ela, esses eventos voltam em `errors`.
 
