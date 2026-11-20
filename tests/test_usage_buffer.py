@@ -56,6 +56,15 @@ class TestAdd:
         assert event['occurred_at'] == '2026-10-30T12:00:00+00:00'
         assert event['client_id'] == '1842'
 
+    def test_datetime_without_timezone_is_rejected(self):
+        """O erro tem que aparecer no add, e não horas depois, no envio do lote."""
+        buffer = UsageBuffer(send=Recorder(), background=False)
+
+        with pytest.raises(ValueError):
+            buffer.add(**login(occurred_at=datetime(2026, 10, 30, 9, 0)))
+
+        assert len(buffer) == 0
+
     def test_full_buffer_drops_the_oldest(self):
         send = Recorder()
         buffer = UsageBuffer(send=send, max_size=3, background=False)

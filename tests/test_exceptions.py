@@ -99,3 +99,14 @@ class TestNetworkFailure:
         assert caught.value.is_retryable is True
         assert caught.value.code == 'NETWORK_ERROR'
         assert caught.value.__cause__ is failure
+
+    @pytest.mark.parametrize('failure, caught_as', [
+        (requests.exceptions.ConnectionError('conexão recusada'), requests.exceptions.ConnectionError),
+        (requests.exceptions.ReadTimeout('demorou demais'), requests.exceptions.Timeout),
+    ])
+    def test_existing_requests_handlers_still_catch(self, admin_client, mocked_responses, failure, caught_as):
+        """Quem já usava o SDK capturando ConnectionError/Timeout do requests não pode deixar de capturar."""
+        mocked_responses.add(responses.POST, f'{BASE_URL}/crm/companies/', body=failure)
+
+        with pytest.raises(caught_as):
+            admin_client.crm.upsert_company(platform_id='1842', name='Construtora Alfa')

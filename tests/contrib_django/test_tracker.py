@@ -106,6 +106,26 @@ class TestHtmx:
 
         assert event['feature'] == 'employers:job_salary'
 
+    def test_boosted_link_counts_on_the_destination_page(self, tracker):
+        """hx-boost é navegação: HX-Current-URL é a página que o usuário está deixando."""
+        event = visit(tracker, '/vagas/123/remuneracao/', HTTP_HX_REQUEST='true',
+                      HTTP_HX_BOOSTED='true', HTTP_HX_CURRENT_URL='http://testserver/vagas/')
+
+        assert event['feature'] == 'employers:job_salary'
+
+    def test_app_under_a_sub_path(self, tracker):
+        """Com SCRIPT_NAME, a URL do navegador tem o prefixo, que o resolve() não conhece."""
+        event = visit(tracker, '/sem-nome/', method='post', SCRIPT_NAME='/app',
+                      HTTP_HX_REQUEST='true', HTTP_HX_CURRENT_URL='http://testserver/app/vagas/')
+
+        assert event['feature'] == 'employers:job_list'
+
+    def test_current_url_with_encoded_characters(self, tracker):
+        """O navegador manda a URL codificada (%C3%A7), a rota está em texto."""
+        event = self.htmx(tracker, '/sem-nome/', 'http://testserver/vagas/1/promo%C3%A7%C3%A3o/')
+
+        assert event['feature'] == 'employers:job_promotion'
+
     def test_current_url_from_another_site_is_ignored(self, tracker):
         assert self.htmx(tracker, '/sem-nome/', 'http://outro-site.com/vagas/') is None
 

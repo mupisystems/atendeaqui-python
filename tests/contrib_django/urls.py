@@ -12,6 +12,7 @@ employers = ([
     path('vagas/', page, name='job_list'),
     path('vagas/<int:job_id>/remuneracao/', page, name='job_salary'),
     path('vagas/<int:job_id>/score/', page, name='job_score'),
+    path('vagas/<int:job_id>/promoção/', page, name='job_promotion'),
 ], 'employers')
 
 admin = ([path('', page, name='index')], 'admin')

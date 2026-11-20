@@ -79,6 +79,13 @@ class TestTrackBatch:
         [event] = sent_events(mocked_responses)
         assert datetime.fromisoformat(event['occurred_at'].replace('Z', '+00:00')) == when
 
+    def test_datetime_without_timezone_is_rejected(self, admin_client, mocked_responses):
+        """Sem fuso, a API leria a hora local como UTC (datetime.now(), USE_TZ=False)."""
+        with pytest.raises(ValueError):
+            admin_client.engagement.track_batch([page_view(occurred_at=datetime(2026, 10, 20, 10, 2, 15))])
+
+        assert len(mocked_responses.calls) == 0
+
     def test_ids_are_sent_as_text(self, admin_client, mocked_responses):
         mocked_responses.add(responses.POST, USAGE_URL, json=OK, status=201)
 
