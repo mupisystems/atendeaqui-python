@@ -6,6 +6,9 @@ SDK Python unificado para a plataforma AtendeAqui.
 
 ```bash
 pip install atendeaqui
+
+# Com a integração Django (telas acessadas e logins)
+pip install "atendeaqui[django]"
 ```
 
 ## Quick Start
@@ -96,6 +99,15 @@ novo = admin.clients.create(
     client_id="meu-sistema-123",  # opcional: usa o ID do seu sistema local
 )
 
+# Buscar pelo ID do seu sistema e criar só se não existir.
+# Use este em vez de create() quando o client_id vem do seu sistema:
+# o AtendeAqui aceita dois clientes com o mesmo client_id.
+cliente, criado = admin.clients.get_or_create(
+    "meu-sistema-123",
+    full_name="Acme Corp",          # usado só se for criar
+    email="contato@acme.com",
+)
+
 # Detalhes do cliente
 cliente = admin.clients.get(client_id=novo.client_id)
 
@@ -121,6 +133,128 @@ admin.clients.update_team_member(novo.client_id, member.id, can_edit_client=True
 # Remover membro
 admin.clients.remove_team_member(novo.client_id, member.id)
 ```
+
+### CRM (requer api_token)
+
+Empresas do CRM, identificadas pelo `platform_id` (o id da empresa no seu sistema).
+A plataforma é a fonte da verdade: os campos enviados sobrescrevem os do CRM, os omitidos não mudam.
+
+```python
+admin = AtendeAquiClient(api_token="seu-bearer-token")
+
+# Cria ou atualiza pelo platform_id (chamar de novo não duplica)
+empresa = admin.crm.upsert_company(
+    platform_id="1842",
+    name="Construtora Alfa",   # único por organização: nome em uso por outra empresa → ValidationError (409)
+    status="cliente",          # prospect, trial, cliente ou churned
+    mrr="349.90",
+)
+
+# Só o nome: status e MRR não mudam
+admin.crm.upsert_company(platform_id="1842", name="Construtora Alfa Ltda")
+
+# mrr=None limpa o MRR (diferente de omitir)
+admin.crm.upsert_company(platform_id="1842", name="Construtora Alfa", status="churned", mrr=None)
+```
+
+### Engajamento de uso (requer api_token e platform)
+
+Eventos de `login`, `page_view` e `activity` de cada cliente do AtendeAqui (pelo `client_id`)
+numa plataforma, com a pessoa que agiu. Sessões, tempo por tela e frequência são calculados no
+AtendeAqui. O cliente precisa existir no AtendeAqui antes dos eventos dele.
+
+A chave tem de ser de **conta de serviço** (`aa_sk_...`), com o escopo `engagement:write`: o token
+legado recebe `403 API_KEY_REQUIRED`. Crie no painel do AtendeAqui, em Configurações → Integrações →
+Contas de serviço, com os escopos que a plataforma usa (ex.: também `clients:write` para cadastrar
+os clientes).
+
+A plataforma vai no cliente do SDK: `platform` é um nome fixo, em minúsculas, que o SDK manda no
+header `X-AtendeAqui-Platform`. A chave fica presa à primeira plataforma que a usar: use uma chave
+para cada plataforma.
+
+```python
+import uuid
+from datetime import datetime, timezone
+
+admin = AtendeAquiClient(api_token="aa_sk_...", platform="etalentos")
+
+# Um evento (event_id e occurred_at são gerados se omitidos)
+admin.engagement.track(type="login", client_id="3f2b...", user_id="77",
+                       user_name="Ana Souza", user_email="ana@casulo.com.br")
+
+# Lote de 1 a 500 eventos
+result = admin.engagement.track_batch([
+    {
+        "type": "page_view",
+        "client_id": "3f2b...",                   # client_id do cliente no AtendeAqui
+        "user_id": "77",                           # a pessoa, na plataforma
+        "user_name": "Ana Souza",                  # nome e e-mail: o que as telas mostram
+        "user_email": "ana@casulo.com.br",
+        "feature": "employers:job_list",          # chave estável da tela (^[a-z0-9_.:-]+$)
+        "feature_name": "Processos seletivos",    # nome exibido; pode mudar
+        # Numa fila, gere estes dois ao enfileirar e reenvie sempre os mesmos
+        # (o UsageBuffer, abaixo, faz isso):
+        "event_id": str(uuid.uuid4()),
+        "occurred_at": datetime.now(timezone.utc),
+    },
+    {
+        "type": "activity",                        # algo de valor que a pessoa fez
+        "client_id": "3f2b...", "user_id": "77",
+        "activity": "vaga_criada",                 # chave estável: vira o tipo de evento
+        "activity_name": "Vaga criada",            # nome exibido (até 200)
+    },
+])
+
+result.accepted     # novos gravados
+result.duplicates   # event_id já recebido (reenvio): não é erro
+for error in result.errors:
+    if error.is_client_not_found:              # code CLIENT_NOT_FOUND
+        ...  # admin.clients.get_or_create(...) e reenvie com o MESMO event_id
+    else:                                      # code INVALID_EVENT
+        ...  # não se resolve sozinho: registre e descarte
+
+# Ou deixe o SDK cadastrar e reenviar: a função recebe os client_id que faltam no
+# AtendeAqui; depois o SDK reenvia esses eventos uma vez, com o mesmo event_id
+def cadastrar_clientes(client_ids):
+    for client_id in client_ids:
+        empresa = minhas_empresas[client_id]
+        admin.clients.get_or_create(client_id, full_name=empresa.nome, email=empresa.email)
+
+result = admin.engagement.track_batch(eventos, on_client_missing=cadastrar_clientes)
+```
+
+| Resultado | O que fazer |
+|---|---|
+| `accepted` / `duplicates` | Remova o evento da fila |
+| `error.is_client_not_found` | Cadastre o cliente e reenvie com o mesmo `event_id` (ou passe `on_client_missing`) |
+| Outros `errors` (`INVALID_EVENT`) | Registre e descarte |
+| `ServerError`, `RateLimitError`, timeout | Reenvie o lote inteiro, com os mesmos `event_id` |
+| `AuthenticationError` | Chave inválida, token legado (`e.code == "API_KEY_REQUIRED"`), chave de outra plataforma (`"PLATFORM_MISMATCH"`) ou plataforma desativada no AtendeAqui (`"PLATFORM_INACTIVE"`): pare e alerte |
+| `ValidationError` com `PLATFORM_REQUIRED`/`PLATFORM_INVALID`/`PLATFORM_CONFLICT` | Configuração da plataforma: pare e alerte |
+
+#### Enviar em lote, fora da requisição: `UsageBuffer`
+
+Para não fazer uma chamada HTTP a cada tela aberta, anote os eventos num bloquinho em memória.
+Uma thread esvazia o bloquinho a cada 10 segundos, ou antes, quando ele junta 100 eventos.
+
+```python
+from atendeaqui import UsageBuffer
+
+# Envio direto
+buffer = UsageBuffer(send=admin.engagement.track_batch)
+
+# Ou por uma fila (ex.: Celery): a task recebe o lote e chama track_batch
+buffer = UsageBuffer(send=lambda events: enviar_uso.delay(events))
+
+buffer.add(type="login", client_id="3f2b...", user_id="77", user_name="Ana Souza")
+```
+
+- `add()` gera o `event_id` e o `occurred_at` na hora da anotação: reenviar o lote não conta duas vezes.
+- Os eventos chegam ao `send` só com texto, então podem ir por JSON.
+- Cada processo tem o seu bloquinho. Cheio (5000 eventos), o mais antigo sai.
+- Ao sair, o processo envia o que sobrou.
+- uWSGI: ligue `enable-threads`, senão a thread não roda.
+- Testes: `UsageBuffer(send=..., background=False)` não liga a thread; chame `buffer.flush()`.
 
 ### Onboarding
 
@@ -578,6 +712,78 @@ progresso traz `email_unsubscribed=True`.
 
 Use valores fixos em minúsculas nos metadados e no `step_data` (ex.: `"saude"`, não `"Saúde"`/`"saude "`).
 
+## Integrar uma aplicação Django
+
+Registra no Atende Aqui o login, as telas acessadas e as atividades dos usuários de uma aplicação
+Django. O SDK reconhece o que é uma tela; a aplicação informa só as regras dela.
+
+**1. Instale com o extra:** `pip install "atendeaqui[django]"`.
+
+**2. Crie o tracker da aplicação** (ex.: `app/engagement.py`):
+
+```python
+from atendeaqui.contrib.django import EngagementTracker
+
+
+class AppTracker(EngagementTracker):
+    # Nome exibido de cada tela, pela chave namespace:url_name
+    screen_names = {"employers:job_list": "Processos"}
+    # Para acrescentar aos padrões, some aos da classe base
+    ignored_prefixes = EngagementTracker.ignored_prefixes + ("/api/",)
+    # Rotas chamadas automaticamente pela página (polling)
+    ignored_features = frozenset({"employers:score"})
+
+    def identify(self, user):
+        """(client_id, user_id, nome, e-mail) de quem é contabilizado, ou None.
+
+        client_id é o do cliente no AtendeAqui (ex.: o UUID da organização);
+        nome e e-mail são opcionais, mas é o que o AtendeAqui mostra da pessoa.
+        """
+        org = user.selected_organization
+        if not org:
+            return None
+        return str(org.secret_key), user.pk, user.get_full_name(), user.email
+
+    def is_active(self):
+        """Opcional: False desliga o registro."""
+        return True
+
+    def send(self, events):
+        """Para onde vai cada lote, ex.: uma task Celery que chama track_batch."""
+        enviar_uso.delay(events)
+
+
+tracker = AppTracker()
+```
+
+**3. Configure o settings:**
+
+```python
+INSTALLED_APPS += ["atendeaqui.contrib.django"]       # registra o login
+MIDDLEWARE += ["atendeaqui.contrib.django.middleware.EngagementMiddleware"]  # depois do AuthenticationMiddleware
+ATENDEAQUI_ENGAGEMENT_TRACKER = "app.engagement.tracker"
+```
+
+O que conta como tela:
+
+- GET com resposta HTML e status 200. POST de formulário, redirect, JSON e páginas de erro ficam de fora.
+- Em requisições HTMX (`HX-Request: true`), qualquer resposta abaixo de 400 conta na página de origem
+  (`HX-Current-URL`, aceito só se for do mesmo host): clicar numa aba conta na tela atual.
+- Link ou formulário com `hx-boost` (`HX-Boosted: true`) é navegação: segue a regra das requisições comuns
+  e conta na página de destino.
+- Ficam de fora `ignored_prefixes` (padrão: `/static/`, `/media/`, `/__debug__/`),
+  `ignored_namespaces` (padrão: `admin`, `djdt`), `ignored_features` e rotas sem `name`.
+
+Cada evento leva `feature` (`namespace:url_name`, a chave estável da tela) e `feature_name` (de
+`screen_names`, ou gerado a partir do `url_name`, com um aviso no log).
+Os eventos vão para um `UsageBuffer` do tracker; erros no registro vão para o log e nunca afetam a página
+nem o login. Nos testes, `AppTracker(background=False)` não liga a thread.
+
+**Atividades:** chame `tracker.track_activity("vaga_criada", "Vaga criada")` no ponto do código em que ela
+acontece, mesmo onde o usuário não chega (ex.: o `save` de um model). Sem `user=`, o SDK usa o usuário da
+requisição em andamento, guardado pelo middleware; fora de requisição (task, shell) não anota nada. A
+chave não deve mudar: ela vira o tipo de evento no AtendeAqui.
+
 ## Tratamento de Erros
 
 ```python
@@ -605,15 +811,35 @@ except AtendeAquiError as e:
 
 ```
 AtendeAquiError
-├── AuthenticationError    # 401/403
+├── AuthenticationError    # 401/403 (inclui API_KEY_REQUIRED, PLATFORM_MISMATCH e PLATFORM_INACTIVE)
 ├── NotFoundError          # 404
 ├── ValidationError        # 400
 │   ├── StepNotFoundError
 │   └── StepNotSkippableError
 ├── OriginNotAllowedError  # CORS
 ├── RateLimitError         # 429
-└── ServerError            # 5xx
+├── ServerError            # 5xx
+└── NetworkError           # sem resposta: rede fora ou tempo esgotado
 ```
+
+### Tentar de novo ou desistir
+
+`is_retryable` diz se tentar de novo pode dar certo: `True` em `ServerError`, `RateLimitError`
+e `NetworkError`; `False` nos demais (dado inválido, token errado ou recurso inexistente não
+mudam com o tempo).
+
+```python
+try:
+    admin.crm.upsert_company(platform_id="1842", name="Construtora Alfa")
+except AtendeAquiError as e:
+    if e.is_retryable:
+        ...  # tente de novo mais tarde (ex.: self.retry numa task Celery)
+    else:
+        ...  # registre e desista
+```
+
+`NetworkError` também é do mesmo tipo do erro original do `requests` (`ConnectionError`, `Timeout`...):
+um `except` antigo para os erros do `requests` continua funcionando.
 
 ## Estrutura do Pacote
 
@@ -623,9 +849,21 @@ atendeaqui/
 ├── client.py            # Cliente principal
 ├── _http.py             # Transport HTTP compartilhado
 ├── exceptions.py        # Exceções compartilhadas
+├── contrib/
+│   └── django/          # Integração Django (extra [django])
+│       ├── tracker.py   # EngagementTracker, get_tracker
+│       ├── middleware.py # EngagementMiddleware
+│       └── apps.py      # Registro de login
 ├── clients/             # Módulo de Clientes
 │   ├── __init__.py      # ClientsModule
 │   └── models.py        # Client, TeamMember
+├── crm/                 # Módulo de CRM
+│   ├── __init__.py      # CrmModule
+│   └── models.py        # Company
+├── engagement/          # Módulo de Engajamento de Uso
+│   ├── __init__.py      # EngagementModule
+│   ├── buffer.py        # UsageBuffer
+│   └── models.py        # UsageResult, UsageError
 └── onboarding/          # Módulo de Onboarding
     ├── __init__.py      # OnboardingModule
     └── models.py        # FlowStructure, UserProgress, etc.
@@ -637,6 +875,7 @@ Novos módulos (tickets, knowledge_base, etc.) seguirão o mesmo padrão.
 
 - Python 3.10+
 - requests >= 2.28
+- Django >= 4.2, só para a integração Django
 
 ## Licença
 

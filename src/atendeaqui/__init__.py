@@ -13,6 +13,7 @@ Uso:
     progress = client.onboarding.complete_step(user_id="user-123", step_key="welcome")
 """
 from .client import AtendeAquiClient
+from .engagement.buffer import UsageBuffer
 from .exceptions import (
     AtendeAquiError,
     AuthenticationError,
@@ -23,8 +24,11 @@ from .exceptions import (
     OriginNotAllowedError,
     RateLimitError,
     ServerError,
+    NetworkError,
 )
 from .clients.models import Client, TeamMember
+from .crm.models import Company
+from .engagement.models import UsageError, UsageResult
 from .onboarding.models import (
     FlowStructure,
     FlowStep,
@@ -36,6 +40,7 @@ from ._version import __version__
 
 __all__ = [
     'AtendeAquiClient',
+    'UsageBuffer',
     # Exceções
     'AtendeAquiError',
     'AuthenticationError',
@@ -46,9 +51,15 @@ __all__ = [
     'OriginNotAllowedError',
     'RateLimitError',
     'ServerError',
+    'NetworkError',
     # Models - Clients
     'Client',
     'TeamMember',
+    # Models - CRM
+    'Company',
+    # Models - Engagement
+    'UsageError',
+    'UsageResult',
     # Models - Onboarding
     'FlowStructure',
     'FlowStep',

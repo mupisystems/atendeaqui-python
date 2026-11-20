@@ -18,6 +18,8 @@ from __future__ import annotations
 
 from ._http import HttpClient
 from .clients import ClientsModule
+from .crm import CrmModule
+from .engagement import EngagementModule
 from .onboarding import OnboardingModule
 
 PRODUCTION_URL = 'https://api.atendeaqui.com.br/v1'
@@ -30,6 +32,8 @@ class AtendeAquiClient:
 
     Expõe módulos como atributos:
     - client.clients — API de Clientes (requer api_token)
+    - client.crm — API de CRM (requer api_token)
+    - client.engagement — API de Engajamento de Uso (requer api_token)
     - client.onboarding — API de Onboarding
 
     Args:
@@ -42,6 +46,9 @@ class AtendeAquiClient:
         sandbox: Se True, usa o ambiente de homologação
                  (api.homolog.atendeaqui.com.br/v1). Padrão: False (produção).
         timeout: Timeout em segundos para requisições HTTP. Padrão: 30.
+        platform: Nome fixo da plataforma que usa o SDK (ex.: "etalentos"),
+                  enviado no header X-AtendeAqui-Platform. Obrigatório para os
+                  eventos de uso: a chave fica presa à primeira plataforma.
 
     Pelo menos um de ``api_token`` ou ``flow_key`` deve ser fornecido.
     """
@@ -52,6 +59,7 @@ class AtendeAquiClient:
         flow_key: str | None = None,
         sandbox: bool = False,
         timeout: int = 30,
+        platform: str | None = None,
         *,
         _base_url: str | None = None,
     ):
@@ -64,6 +72,9 @@ class AtendeAquiClient:
         headers: dict = {}
         if api_token:
             headers['Authorization'] = f'Bearer {api_token}'
+        # O AtendeAqui só lê o header nos eventos de uso; o resto da API o ignora
+        if platform:
+            headers['X-AtendeAqui-Platform'] = platform
 
         self._http = HttpClient(
             base_url=_base_url or (SANDBOX_URL if sandbox else PRODUCTION_URL),
@@ -73,12 +84,24 @@ class AtendeAquiClient:
 
         # Inicializar módulos
         self._clients = ClientsModule(self._http)
+        self._crm = CrmModule(self._http)
+        self._engagement = EngagementModule(self._http)
         self._onboarding = OnboardingModule(self._http, default_flow_key=flow_key)
 
     @property
     def clients(self) -> ClientsModule:
         """Módulo de Clientes — CRUD de clientes e equipe (requer api_token)."""
         return self._clients
+
+    @property
+    def crm(self) -> CrmModule:
+        """Módulo de CRM — empresas do CRM pelo platform_id (requer api_token)."""
+        return self._crm
+
+    @property
+    def engagement(self) -> EngagementModule:
+        """Módulo de Engajamento de Uso — eventos de login e telas (requer api_token)."""
+        return self._engagement
 
     @property
     def onboarding(self) -> OnboardingModule:

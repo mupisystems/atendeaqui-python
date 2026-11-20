@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from ..exceptions import NotFoundError
 from .models import Client, TeamMember
 
 if TYPE_CHECKING:
@@ -104,6 +105,30 @@ class ClientsModule:
 
         data = self._http.post('clients/', json=body)
         return Client.from_dict(data)
+
+    def get_or_create(self, client_id: str, full_name: str, **fields) -> tuple[Client, bool]:
+        """
+        Devolve o cliente com este client_id, criando-o se ainda não existir.
+
+        O AtendeAqui aceita dois clientes com o mesmo client_id: este método
+        consulta antes de criar para não duplicar. Ele não protege contra duas
+        chamadas ao mesmo tempo para o mesmo client_id; chame de um lugar só
+        (ex.: uma task).
+
+        Args:
+            client_id: ID do cliente no seu sistema.
+            full_name: Nome completo, usado só se o cliente for criado.
+            **fields: Outros campos de create() (email, phone...), usados só
+                se o cliente for criado.
+
+        Returns:
+            (cliente, criado): criado é True quando o cliente foi criado agora.
+        """
+        try:
+            return self.get(client_id), False
+        except NotFoundError:
+            pass
+        return self.create(full_name=full_name, client_id=client_id, **fields), True
 
     def update(
         self,
