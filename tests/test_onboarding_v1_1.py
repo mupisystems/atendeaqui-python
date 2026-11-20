@@ -181,5 +181,4 @@ class TestVersion:
 
         client.onboarding.start_step(user_id='user-123', step_key='welcome')
 
-        assert __version__ == '1.1.0'
-        assert responses.calls[0].request.headers['User-Agent'] == 'atendeaqui-python/1.1.0'
+        assert responses.calls[0].request.headers['User-Agent'] == f'atendeaqui-python/{__version__}'

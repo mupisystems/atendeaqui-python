@@ -95,6 +95,7 @@ class UserProgress:
     started_at: datetime | None
     completed_at: datetime | None
     last_activity_at: datetime | None
+    email_unsubscribed: bool = False
 
     @classmethod
     def from_dict(cls, data: dict) -> UserProgress:
@@ -115,6 +116,7 @@ class UserProgress:
             started_at=_parse_datetime(data.get('started_at')),
             completed_at=_parse_datetime(data.get('completed_at')),
             last_activity_at=_parse_datetime(data.get('last_activity_at')),
+            email_unsubscribed=bool(data.get('email_unsubscribed', False)),
         )
 
     @property
