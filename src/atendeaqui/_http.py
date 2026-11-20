@@ -114,7 +114,7 @@ class HttpClient:
             )
         except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as exc:
             # Sem resposta do servidor: vira erro do SDK, que diz se vale tentar de novo
-            raise NetworkError(f'Falha de rede: {exc}', code='NETWORK_ERROR') from exc
+            raise NetworkError.from_requests(exc) from exc
 
         if not response.ok:
             self._handle_error(response)

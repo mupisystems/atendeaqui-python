@@ -23,6 +23,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Callable
 
+from .._datetime import format_occurred_at
 from .models import UsageResult
 
 if TYPE_CHECKING:
@@ -35,7 +36,7 @@ def _prepare_event(event: dict) -> dict:
     """Devolve uma cópia do evento pronta para o contrato.
 
     - `event_id` e `occurred_at` só são gerados quando não vieram.
-    - `occurred_at` em datetime vira ISO 8601 com fuso.
+    - `occurred_at` em datetime vira ISO 8601 com fuso (sem fuso: ValueError).
     - `client_id` e `user_id` vão como texto.
     - Não altera o dict recebido.
     """
@@ -52,7 +53,7 @@ def _prepare_event(event: dict) -> dict:
     if occurred_at is None:
         prepared['occurred_at'] = datetime.now(timezone.utc).isoformat()
     elif isinstance(occurred_at, datetime):
-        prepared['occurred_at'] = occurred_at.isoformat()
+        prepared['occurred_at'] = format_occurred_at(occurred_at)
 
     # 4) IDs sempre como texto
     prepared['client_id'] = str(prepared['client_id'])
@@ -98,7 +99,8 @@ class EngagementModule:
             feature: Chave estável da tela (só no page_view), ex.: "employers:job_list".
             feature_name: Nome exibido da tela (só no page_view).
             event_id: UUID do evento. Gerado se omitido.
-            occurred_at: Quando aconteceu. Agora (UTC) se omitido.
+            occurred_at: Quando aconteceu (datetime com fuso ou string ISO 8601).
+                Agora (UTC) se omitido.
             user_name, user_email: Nome e e-mail da pessoa, mostrados nas telas.
             activity, activity_name: Chave e nome da atividade (só na "activity").
         """

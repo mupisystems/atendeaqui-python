@@ -769,6 +769,8 @@ O que conta como tela:
 - GET com resposta HTML e status 200. POST de formulário, redirect, JSON e páginas de erro ficam de fora.
 - Em requisições HTMX (`HX-Request: true`), qualquer resposta abaixo de 400 conta na página de origem
   (`HX-Current-URL`, aceito só se for do mesmo host): clicar numa aba conta na tela atual.
+- Link ou formulário com `hx-boost` (`HX-Boosted: true`) é navegação: segue a regra das requisições comuns
+  e conta na página de destino.
 - Ficam de fora `ignored_prefixes` (padrão: `/static/`, `/media/`, `/__debug__/`),
   `ignored_namespaces` (padrão: `admin`, `djdt`), `ignored_features` e rotas sem `name`.
 
@@ -836,8 +838,8 @@ except AtendeAquiError as e:
         ...  # registre e desista
 ```
 
-`NetworkError` também é uma `requests.RequestException`: um `except` antigo para os erros do
-`requests` continua funcionando.
+`NetworkError` também é do mesmo tipo do erro original do `requests` (`ConnectionError`, `Timeout`...):
+um `except` antigo para os erros do `requests` continua funcionando.
 
 ## Estrutura do Pacote
 

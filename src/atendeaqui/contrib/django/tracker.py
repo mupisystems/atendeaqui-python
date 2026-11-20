@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 from contextvars import ContextVar
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
@@ -167,7 +167,7 @@ class EngagementTracker:
         Requisição comum: só GET com resposta HTML e status 200. POST de
         formulário, redirect e JSON (notificações, autocomplete) ficam de fora.
         """
-        if request.headers.get('HX-Request') == 'true':
+        if self.is_htmx_fragment(request):
             return response.status_code < 400
         return (
             request.method == 'GET'
@@ -186,7 +186,7 @@ class EngagementTracker:
         if called and called.view_name in self.ignored_features:
             return None
 
-        if request.headers.get('HX-Request') == 'true':
+        if self.is_htmx_fragment(request):
             path = self.page_path(request)
             if not path:
                 return None
@@ -202,8 +202,20 @@ class EngagementTracker:
             return None
         return match
 
+    def is_htmx_fragment(self, request) -> bool:
+        """
+        True se é um fragmento HTMX (aba, filtro...), que conta na página de origem.
+
+        Link ou formulário com hx-boost é navegação: conta como requisição comum,
+        na página de destino (HX-Current-URL ainda é a página que ficou para trás).
+        """
+        return request.headers.get('HX-Request') == 'true' and request.headers.get('HX-Boosted') != 'true'
+
     def page_path(self, request) -> str | None:
-        """Caminho da página de origem do HTMX, ou None se o cabeçalho não for confiável."""
+        """
+        Caminho da página de origem do HTMX, no formato do resolve(), ou None
+        se o cabeçalho não for confiável ou a página for de fora da aplicação.
+        """
         current = request.headers.get('HX-Current-URL') or ''
         if not current:
             return None
@@ -212,7 +224,15 @@ class EngagementTracker:
             current, allowed_hosts={request.get_host()}, require_https=request.is_secure(),
         ):
             return None
-        return urlparse(current).path
+        # O navegador manda a URL codificada (%C3%A7) e com o prefixo da aplicação
+        # (SCRIPT_NAME); o resolve() espera o texto e só o caminho de dentro (path_info)
+        path = unquote(urlparse(current).path)
+        script_prefix = request.path[:len(request.path) - len(request.path_info)]
+        if not script_prefix:
+            return path
+        if path != script_prefix and not path.startswith(script_prefix + '/'):
+            return None
+        return path[len(script_prefix):] or '/'
 
     def screen_name(self, feature: str) -> str:
         """

@@ -8,6 +8,10 @@ Todas as exceções herdam de AtendeAquiError, que fornece:
 - response: objeto Response original (quando disponível)
 - is_retryable: True quando tentar de novo pode dar certo (5xx, 429, rede)
 """
+from __future__ import annotations
+
+import functools
+
 import requests
 
 
@@ -71,10 +75,22 @@ class ServerError(AtendeAquiError):
 class NetworkError(AtendeAquiError, requests.exceptions.RequestException):
     """Falha de rede: servidor fora do ar, conexão recusada ou tempo esgotado.
 
-    Também é uma `requests.RequestException`: quem já capturava os erros do
-    requests continua capturando.
+    O erro levantado também é do mesmo tipo do erro original do requests
+    (ConnectionError, Timeout...): quem já capturava os erros do requests
+    continua capturando.
     """
     is_retryable = True
+
+    @classmethod
+    def from_requests(cls, exc: requests.exceptions.RequestException) -> NetworkError:
+        """NetworkError que também é uma instância do tipo de `exc`."""
+        return _network_error_class(type(exc))(f'Falha de rede: {exc}', code='NETWORK_ERROR')
+
+
+@functools.lru_cache(maxsize=None)
+def _network_error_class(requests_class: type) -> type:
+    # Herda dos dois: except NetworkError e except requests.ConnectionError pegam o mesmo erro
+    return type('NetworkError', (NetworkError, requests_class), {'__module__': __name__})
 
 
 # Mapeamento de códigos da API para classes de exceção

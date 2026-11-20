@@ -13,32 +13,16 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING
 
+from .._datetime import format_occurred_at
 from .models import FlowStructure, UserProgress, WidgetToken, FlowAnalytics
 
 if TYPE_CHECKING:
     from .._http import HttpClient
 
 
-def _format_occurred_at(occurred_at: datetime | str | None) -> str | None:
-    """
-    ``occurred_at`` como ISO 8601 para a API.
-
-    datetime sem fuso é recusado: a API o leria no fuso do servidor, e o
-    evento ficaria registrado horas antes ou depois do que aconteceu.
-    """
-    if occurred_at is None or isinstance(occurred_at, str):
-        return occurred_at
-    if occurred_at.tzinfo is None or occurred_at.utcoffset() is None:
-        raise ValueError(
-            'occurred_at precisa ter fuso horário (ex.: datetime.now(timezone.utc) '
-            'ou django.utils.timezone.now()).'
-        )
-    return occurred_at.isoformat()
-
-
 def _with_occurred_at(body: dict, occurred_at: datetime | str | None) -> dict:
     """Inclui occurred_at no corpo quando informado."""
-    formatted = _format_occurred_at(occurred_at)
+    formatted = format_occurred_at(occurred_at)
     if formatted:
         body['occurred_at'] = formatted
     return body
